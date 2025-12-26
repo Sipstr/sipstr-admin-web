@@ -87,7 +87,7 @@ const OrderDetailsDialog = ({ order }: { order: Order }) => {
         <div>
           <p className="mb-2"><strong>Customer:</strong> {order.userName}</p>
           <p className="mb-2"><strong>Address:</strong> <span className="text-gray-600">{order.address ?? "—"}</span></p>
-          <p className="mb-2"><strong>Order Status:</strong> <span className="text-gray-600">{order.orderStatus}</span></p>
+          <p className="mb-2"><strong>Order Status:</strong> <span className="text-gray-600">{order.refundStatus}</span></p>
           <p className="mb-2"><strong>Items:</strong> <span className="text-gray-600">{order.itemOrderedCount ?? (order.items?.length ?? 0)}</span></p>
         </div>
 
@@ -213,7 +213,7 @@ const FullRefundDetail = ({ order, onBack, onProcessRefund }: {
       <div className="mt-8 pt-4 border-t flex justify-end">
         <button
           onClick={() => setShowConfirm(true)}
-          disabled={loading || ((order.orderStatus ?? "").toString().toUpperCase() === 'REFUNDED')}
+          disabled={loading || ((order.refundStatus ?? "").toString().toUpperCase() === 'FULL_REFUND')}
           className="px-6 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 disabled:opacity-50 transition"
         >
         {loading ? "Processing..." : `Process Full Refund ($${fmt(order.originalTotal)})`}
@@ -646,8 +646,8 @@ export function OrdersModule() {
     try {
       const full = await apiService.getTrackedOrder(orderShortId);
 
-      const status = (full?.orderStatus ?? "").toString().toUpperCase();
-      if (pendingRefundType === 'full' && status === 'REFUNDED') {
+      const status = (full?.refundStatus ?? "").toString().toUpperCase();
+      if (pendingRefundType === 'full' && status === 'FULL_REFUND') {
         tempOrderRef.current = full;
         setShowAlreadyRefundedInfo(true);
         return;
