@@ -125,9 +125,9 @@ export default function MapPreviewGoogle({
                 <GPolygon
                   paths={poly}
                   options={{
-                    fillColor: z.isRestricted ? "#e86b4a" : "#25a18e",
+                    fillColor: z.restricted ? "#e86b4a" : "#25a18e",
                     fillOpacity: 0.12,
-                    strokeColor: z.isRestricted ? "#e86b4a" : "#25a18e",
+                    strokeColor: z.restricted ? "#e86b4a" : "#25a18e",
                     strokeOpacity: 0.8,
                     strokeWeight: 2,
                   }}
@@ -140,7 +140,7 @@ export default function MapPreviewGoogle({
                 <InfoWindow position={poly[0]} onCloseClick={() => setOpenInfo(null)}>
                   <div style={{ minWidth: 160 }}>
                     <div style={{ fontWeight: 700 }}>{z.zoneName}</div>
-                    <div style={{ fontSize: 13, color: "#444" }}>{z.isRestricted ? "Restricted" : "Open"}</div>
+                    <div style={{ fontSize: 13, color: "#444" }}>{z.restricted ? "Restricted" : "Open"}</div>
                     <div style={{ marginTop: 6, fontSize: 13 }}>
                       Base: ${z.baseDeliveryFee?.toFixed?.(2) ?? z.baseDeliveryFee} • Per mile: ${z.perMileFee?.toFixed?.(2) ?? z.perMileFee} 
                       
