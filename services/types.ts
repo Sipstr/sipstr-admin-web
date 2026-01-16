@@ -141,7 +141,7 @@ export interface DeliveryZone {
   perMileFee: number; 
   minOrderAmount: number; 
   estimatedPreparationTime: number; 
-  isRestricted: boolean; 
+  restricted: boolean; 
   coordinates: number[][]; 
   storeUuid: string 
 }
@@ -153,7 +153,7 @@ export interface CreateDeliveryZoneRequest {
   perMileFee: number;
   minOrderAmount: number;
   estimatedPreparationTime: number;
-  isRestricted: boolean;
+  restricted: boolean;
   coordinates: [number, number][]; // array of [lat, lng] tuples
   storeUuid: string;
 }

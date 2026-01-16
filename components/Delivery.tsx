@@ -284,7 +284,7 @@ export default function DeliveryZonesAdmin() {
     perMileFee: 0,
     minOrderAmount: 0,
     estimatedPreparationTime: 0,
-    isRestricted: false,
+    restricted: false,
     coordinates: [[0, 0]],
     storeUuid: "",
   });
@@ -401,7 +401,7 @@ export default function DeliveryZonesAdmin() {
       perMileFee: Number(pm.parsedDescription?.perMileFee ?? 0),
       minOrderAmount: Number(pm.parsedDescription?.minOrderAmount ?? 0),
       estimatedPreparationTime: Number(pm.parsedDescription?.estimatedPreparationTime ?? 0),
-      isRestricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
+      restricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
       coordinates: coords,
       storeUuid: selectedStoreUuid ?? "",
     };
@@ -423,7 +423,7 @@ export default function DeliveryZonesAdmin() {
       perMileFee: Number(pm.parsedDescription?.perMileFee ?? 0),
       minOrderAmount: Number(pm.parsedDescription?.minOrderAmount ?? 0),
       estimatedPreparationTime: Number(pm.parsedDescription?.estimatedPreparationTime ?? 0),
-      isRestricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
+      restricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
       coordinates: coords,
       storeUuid: selectedStoreUuid!,
     };
@@ -451,7 +451,7 @@ export default function DeliveryZonesAdmin() {
           perMileFee: 0,
           minOrderAmount: 0,
           estimatedPreparationTime: 0,
-          isRestricted: false,
+          restricted: false,
           coordinates: [[0, 0]],
           storeUuid: "",
         });
@@ -539,7 +539,7 @@ export default function DeliveryZonesAdmin() {
       perMileFee: zone.perMileFee,
       minOrderAmount: zone.minOrderAmount,
       estimatedPreparationTime: zone.estimatedPreparationTime ?? 0,
-      isRestricted: zone.isRestricted,
+      restricted: zone.restricted,
       coordinates: zone.coordinates as [number, number][],
       storeUuid: zone.storeUuid,
     });
@@ -584,7 +584,7 @@ export default function DeliveryZonesAdmin() {
                     perMileFee: 0,
                     minOrderAmount: 0,
                     estimatedPreparationTime: 0,
-                    isRestricted: false,
+                    restricted: false,
                     coordinates: [[0, 0]],
                     storeUuid: selectedStoreUuid ?? "",
                   });
@@ -701,7 +701,7 @@ export default function DeliveryZonesAdmin() {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <div>
                           <div style={{ fontSize: 16, fontWeight: 600 }}>{zone.zoneName}</div>
-                          <div style={{ fontSize: 12, color: "#666" }}>{zone.isRestricted ? "Restricted" : "Open"}</div>
+                          <div style={{ fontSize: 12, color: "#666" }}>{zone.restricted ? "Restricted" : "Open"}</div>
                         </div>
                         <div>
                           <button
@@ -981,7 +981,7 @@ export default function DeliveryZonesAdmin() {
                   </label>
 
                   <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input type="checkbox" checked={form.isRestricted} onChange={(e) => setForm({ ...form, isRestricted: e.target.checked })} />
+                    <input type="checkbox" checked={form.restricted} onChange={(e) => setForm({ ...form, restricted: e.target.checked })} />
                     <span>Restricted</span>
                   </label>
 
