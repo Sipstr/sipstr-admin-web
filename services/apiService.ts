@@ -44,7 +44,7 @@ export const apiService = {
   ) => apiCall<void>("POST", "/orders/refund/partial", { 
     orderShortId: shortId, 
     itemIds,
-    deliveryfee,
+    deliveryFee: deliveryfee,
     tip
   }),
   getRecentOrders: async (limit: number = 45, storeUuid?: string): Promise<RecentOrder[]> => {
