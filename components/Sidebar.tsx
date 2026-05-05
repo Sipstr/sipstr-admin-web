@@ -85,7 +85,7 @@ export function Sidebar({ activeModule, onModuleChange, isOpen, onToggle, sessio
             justifyContent: "space-between",
           }}
         >
-          <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "bold", color: "#FF6600" }}>Admin</h1>
+          <img src="/Sipstr.PNG" alt="Sipstr" style={{ height: "32px", width: "auto", objectFit: "contain" }} />
 
           {isOpen && (
             <button

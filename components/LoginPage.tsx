@@ -39,17 +39,9 @@ export function LoginPage({ onLogin, loading, error }: LoginPageProps) {
           maxWidth: "400px",
         }}
       >
-        <h2
-          style={{
-            fontSize: "28px",
-            fontWeight: "bold",
-            marginBottom: "30px",
-            textAlign: "center",
-            color: "#FF6600",
-          }}
-        >
-          Welcome to SIPSTR
-        </h2>
+        <div style={{ textAlign: "center", marginBottom: "30px" }}>
+          <img src="/Sipstr.PNG" alt="Sipstr" style={{ height: "60px", width: "auto", objectFit: "contain", margin: "0 auto" }} />
+        </div>
         <h2
           style={{
             fontSize: "24px",
