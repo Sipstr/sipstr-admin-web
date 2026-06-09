@@ -127,27 +127,23 @@ export const apiService = {
       brand: data.brand,
       categoryName: data.categoryName,
       taxCategory: data.taxCategory ?? "General",
-      isAlcoholic: false,
-      isGlutenFree: false,
-      isKosher: false,
-      isWine: false,
-      hasTobacco: false,
-      hasCannabis: false,
-      isReturnable: true,
-      isPerishable: false,
-      allergenInfo: "",
-      nutritionalInfo: "",
-      active:data.isActive
-    }),
+      isAlcoholic: data.isAlcoholic ?? false,
+      isGlutenFree: data.isGlutenFree ?? false,
+      isKosher: data.isKosher ?? false,
+      isWine: data.isWine ?? false,
+      hasTobacco: data.hasTobacco ?? false,
+      hasCannabis: data.hasCannabis ?? false,
+      isReturnable: data.isReturnable ?? true,
+      isPerishable: data.isPerishable ?? false,
+      allergenInfo: data.allergenInfo ?? "",
+      nutritionalInfo: data.nutritionalInfo ?? "",
+      active: data.isActive ?? true,
+    }),
 
-  updateProduct: async (uuid: string, data: Partial<Product>) => apiCall<Product>("PATCH", `/products/${uuid}`, data),
-  deleteProduct: async (uuid: string) => apiCall<void>("DELETE", `/products/${uuid}`),
+  createVariant: async (productId: string, data: unknown) =>
+    apiCall<ProductVariant>("POST", `/products/${productId}/variants`, data),
 
-  // --- Variants ---
-createVariant: async (productId: number, data: unknown) => 
-  apiCall<ProductVariant>("POST", `/products/${productId}/variants`, data),
-
-updateVariant: async (variantId: string, data: unknown) => 
+  updateVariant: async (variantId: string, data: unknown) => 
   apiCall<ProductVariant>("PATCH", `/products/variants/${variantId}`, data),
   
 deleteVariant: async (variantId: string) => 

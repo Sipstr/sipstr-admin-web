@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { Menu } from "lucide-react"
 import type { AdminSession } from "../app"
 
 import { Sidebar } from "./Sidebar" // Assuming Sidebar is a named export for structure
@@ -45,96 +46,69 @@ export function DashboardLayout({ session, onLogout }: DashboardLayoutProps) {
 
   const renderModule = () => {
     switch (activeModule) {
-      case "users":
-        return <UsersModule />
-      case "reasons":
-        return <ReasonsModule />
-      case "substitute":
-        return <SubstituteModule />
-      case "orders":
-        return <OrdersModule />
-      case "zones":
-        return <DeliveryZonesPage />
-      case "products":
-        return <ProductsModule />
-      case "brands":
-        return <BCPModule />
-      case "coupon":
-        return <CouponsModule />
-      case "stores":
-        return <StoresModule />
-      case "roles":
-        return <RolesModule />
-      case "top-picks":
-        return <TopPicksModule />
-      case "reports":
-        return <ReportsModule />
-      case "audit-logs":
-        return <AuditLogsModule />;
-      default:
-        return <DashboardHome />
+      case "users":        return <UsersModule />
+      case "reasons":      return <ReasonsModule />
+      case "substitute":   return <SubstituteModule />
+      case "orders":       return <OrdersModule />
+      case "zones":        return <DeliveryZonesPage />
+      case "products":     return <ProductsModule />
+      case "brands":       return <BCPModule />
+      case "coupon":       return <CouponsModule />
+      case "stores":       return <StoresModule />
+      case "roles":        return <RolesModule />
+      case "top-picks":    return <TopPicksModule />
+      case "reports":      return <ReportsModule />
+      case "audit-logs":   return <AuditLogsModule />
+      default:             return <DashboardHome />
     }
   }
 
+  const pageTitle =
+    activeModule === "dashboard"
+      ? "Dashboard"
+      : activeModule.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+
   return (
-    <div
-      style={{
-        display: "flex",
-        height: "100vh",
-        backgroundColor: "#f5f5f5",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-      }}
-    >
+    <div className="flex h-screen bg-gray-50 font-sans">
       <Sidebar
         activeModule={activeModule}
-        onModuleChange={setActiveModule}
+        onModuleChange={(m) => setActiveModule(m as ModuleType)}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         session={session}
         onLogout={onLogout}
       />
 
+      {/* Main content — offset by sidebar width when open */}
       <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          marginLeft: sidebarOpen ? "0" : "50px", // <-- shift content right when sidebar open
-          transition: "margin-left 0.3s ease",      // smooth transition
-        }}
+        className={`flex flex-col flex-1 overflow-hidden transition-all duration-300 ${
+          sidebarOpen ? "ml-64" : "ml-0"
+        }`}
       >
-        <header
-          style={{
-            backgroundColor: "white",
-            borderBottom: "1px solid #e0e0e0",
-            padding: "16px 24px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "20px",
-              fontWeight: "600",
-              color: "#333",
-              textTransform: "capitalize",
-            }}
-          >
-            {activeModule === "dashboard" ? "Dashboard" : activeModule.replace("-", " ")}
-          </h2>
-          <div style={{ fontSize: "14px", color: "#666" }}>{session.email}</div>
+        {/* Top header */}
+        <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shadow-sm">
+          <div className="flex items-center gap-3">
+            {!sidebarOpen && (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-500"
+                title="Open sidebar"
+              >
+                <Menu size={20} />
+              </button>
+            )}
+            <h1 className="text-xl font-semibold text-gray-800 capitalize">{pageTitle}</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-sm font-semibold">
+              {session.email.charAt(0).toUpperCase()}
+            </div>
+            <span className="text-sm text-gray-600 hidden sm:block">{session.email}</span>
+          </div>
         </header>
 
-        <main
-          style={{
-            flex: 1,
-            overflow: "auto",
-            padding: "24px",
-          }}
-        >
+        {/* Page content */}
+        <main className="flex-1 overflow-auto p-6">
           {renderModule()}
         </main>
       </div>
@@ -143,32 +117,22 @@ export function DashboardLayout({ session, onLogout }: DashboardLayoutProps) {
 }
 
 function DashboardHome() {
+  const stats = [
+    { title: "Total Users",    value: "1,234" },
+    { title: "Total Orders",   value: "5,678" },
+    { title: "Total Products", value: "342"   },
+    { title: "Total Stores",   value: "28"    },
+  ]
+
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-        gap: "20px",
-      }}
-    >
-      {[
-        { title: "Total Users", value: "1,234", color: "#FF6600" },
-        { title: "Total Orders", value: "5,678", color: "#FF6600" },
-        { title: "Total Products", value: "342", color: "#FF6600" },
-        { title: "Total Stores", value: "28", color: "#FF6600" },
-      ].map((stat, idx) => (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      {stats.map((stat) => (
         <div
-          key={idx}
-          style={{
-            backgroundColor: "white",
-            padding: "24px",
-            borderRadius: "8px",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            borderLeft: `4px solid ${stat.color}`,
-          }}
+          key={stat.title}
+          className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 border-l-4 border-l-orange-500"
         >
-          <p style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#666" }}>{stat.title}</p>
-          <p style={{ margin: 0, fontSize: "32px", fontWeight: "bold", color: "#333" }}>{stat.value}</p>
+          <p className="text-sm text-gray-500 mb-2">{stat.title}</p>
+          <p className="text-3xl font-bold text-gray-800">{stat.value}</p>
         </div>
       ))}
     </div>
