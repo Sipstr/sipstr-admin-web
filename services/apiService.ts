@@ -140,6 +140,28 @@ export const apiService = {
       active: data.isActive ?? true,
     }),
 
+  updateProduct: async (uuid: string, data: Partial<Product>) =>
+    apiCall<Product>("PATCH", `/products/${uuid}`, {
+      productName: data.productName,
+      description: data.description ?? "",
+      brand: data.brand,
+      categoryName: data.categoryName,
+      taxCategory: data.taxCategory ?? "General",
+      isAlcoholic: data.isAlcoholic ?? false,
+      isGlutenFree: data.isGlutenFree ?? false,
+      isKosher: data.isKosher ?? false,
+      isWine: data.isWine ?? false,
+      hasTobacco: data.hasTobacco ?? false,
+      hasCannabis: data.hasCannabis ?? false,
+      isReturnable: data.isReturnable ?? true,
+      isPerishable: data.isPerishable ?? false,
+      allergenInfo: data.allergenInfo ?? "",
+      nutritionalInfo: data.nutritionalInfo ?? "",
+      active: data.isActive ?? true,
+    }),
+
+  deleteProduct: async (uuid: string) => apiCall<void>("DELETE", `/products/${uuid}`),
+
   createVariant: async (productId: string, data: unknown) =>
     apiCall<ProductVariant>("POST", `/products/${productId}/variants`, data),
 
