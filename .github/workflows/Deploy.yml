@@ -125,7 +125,7 @@ jobs:
       
       - name: Export Next.js Environment Variables
         run: |
-          echo "NEXT_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_BASE_URL }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_BASE_URL=https://api.dev.sipstr.com" >> $GITHUB_ENV
           echo "NEXT_PUBLIC_ROLE=${{ vars.NEXT_PUBLIC_ROLE }}" >> $GITHUB_ENV
 
           echo "NEXT_PUBLIC_FEATURE_DASHBOARD=${{ vars.NEXT_PUBLIC_FEATURE_DASHBOARD }}" >> $GITHUB_ENV
