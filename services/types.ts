@@ -141,7 +141,7 @@ export interface DeliveryZone {
   perMileFee: number; 
   minOrderAmount: number; 
   estimatedPreparationTime: number; 
-  isRestricted: boolean; 
+  restricted: boolean; 
   coordinates: number[][]; 
   storeUuid: string 
 }
@@ -153,11 +153,10 @@ export interface CreateDeliveryZoneRequest {
   perMileFee: number;
   minOrderAmount: number;
   estimatedPreparationTime: number;
-  isRestricted: boolean;
+  restricted: boolean;
   coordinates: [number, number][]; // array of [lat, lng] tuples
   storeUuid: string;
 }
-
 
 
 export interface StoreItemDTO {
@@ -173,6 +172,7 @@ export interface StoreItemDTO {
     quantity: number
     price: number
     finalPrice: number
+    isRefunded: boolean
     status: string
   }[]
 }
@@ -406,4 +406,44 @@ export interface GroupedStoreInventoryResponseDTO {
   productName: string;
   productId: number;
   variants: StoreInventoryVariantDTO[];
+}
+
+// types.ts (add)
+export type StoreCancelReasonRequestDTO = {
+  reason: string;
+  description?: string;
+};
+
+export type StoreCancelReasonResponseDTO = {
+  id: number;
+  reason: string;
+  description?: string;
+  deleted?: boolean;
+};
+
+export interface AuditLogStoreInfo {
+  storeUuid?: string;
+  storeName?: string;
+  // keep flexible: backend shape may vary
+  [k: string]: any;
+}
+
+export interface AuditLog {
+  id: number;
+  userId?: number;
+  userUuid?: string;
+  userEmail?: string;
+  httpMethod?: string;
+  endpoint?: string;
+  queryParams?: string | null;
+  requestBody?: string | object | null;
+  responseBody?: string | object | null;
+  ipAddress?: string;
+  userAgent?: string;
+  statusCode?: number;
+  responseTimeMs?: number;
+  errorMessage?: string | null;
+  createdAt?: string; // ISO
+  // keep raw shape for flexibility
+  [k: string]: any;
 }

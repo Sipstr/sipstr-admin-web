@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { apiService } from "@/services/apiService";
-import { Product } from "@/services/types";
+import { Brand, Category, Product } from "@/services/types";
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -13,6 +13,13 @@ interface ProductModalProps {
 
 const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, onProductSaved }) => {
   const [formData, setFormData] = useState<Partial<Product>>({});
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  useEffect(() => {
+    apiService.getBrands().then(setBrands).catch(() => {});
+    apiService.getCategories().then(setCategories).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (product) {
@@ -92,22 +99,28 @@ const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, o
             onChange={handleChange}
             className="border p-2 rounded w-full"
           />
-          <input
-            type="text"
+          <select
             name="brand"
-            placeholder="Brand"
             value={formData.brand || ""}
-            onChange={handleChange}
-            className="border p-2 rounded w-full"
-          />
-          <input
-            type="text"
+            onChange={(e) => setFormData((prev) => ({ ...prev, brand: e.target.value }))}
+            className="border p-2 rounded w-full bg-white"
+          >
+            <option value="">-- Select Brand --</option>
+            {brands.map((b) => (
+              <option key={b.id} value={b.name}>{b.name}</option>
+            ))}
+          </select>
+          <select
             name="categoryName"
-            placeholder="Category"
             value={formData.categoryName || ""}
-            onChange={handleChange}
-            className="border p-2 rounded w-full"
-          />
+            onChange={(e) => setFormData((prev) => ({ ...prev, categoryName: e.target.value }))}
+            className="border p-2 rounded w-full bg-white"
+          >
+            <option value="">-- Select Category --</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
           <input
             type="text"
             name="taxCategory"
@@ -168,7 +181,7 @@ const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, o
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                name="active"
+                name="isActive"
                 checked={formData.isActive ?? true}
                 onChange={handleChange}
               />

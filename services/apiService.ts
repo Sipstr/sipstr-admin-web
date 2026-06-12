@@ -2,7 +2,7 @@
 import { apiCall, setToken,setRefreshToken,clearToken } from "./api";
 import { Product, PackageUnit, Role, TopPick, User, Store, StoreItemDTO, StoreReportItemDTO, PageResponse,
   OfferDetailRequest, OfferDetailResponse, Order, LoginResponse, Brand, DeliveryZone, Category,ProductVariant,
-  RecentOrder, SubstitutionRequest, GroupedStoreInventoryResponseDTO
+  RecentOrder, SubstitutionRequest, GroupedStoreInventoryResponseDTO, StoreCancelReasonRequestDTO, StoreCancelReasonResponseDTO, AuditLog
  } from "./types";
 
 // --- API Service ---
@@ -44,7 +44,7 @@ export const apiService = {
   ) => apiCall<void>("POST", "/orders/refund/partial", { 
     orderShortId: shortId, 
     itemIds,
-    deliveryfee,
+    deliveryFee: deliveryfee,
     tip
   }),
   getRecentOrders: async (limit: number = 45, storeUuid?: string): Promise<RecentOrder[]> => {
@@ -127,27 +127,45 @@ export const apiService = {
       brand: data.brand,
       categoryName: data.categoryName,
       taxCategory: data.taxCategory ?? "General",
-      isAlcoholic: false,
-      isGlutenFree: false,
-      isKosher: false,
-      isWine: false,
-      hasTobacco: false,
-      hasCannabis: false,
-      isReturnable: true,
-      isPerishable: false,
-      allergenInfo: "",
-      nutritionalInfo: "",
-      active:data.isActive
-    }),
+      isAlcoholic: data.isAlcoholic ?? false,
+      isGlutenFree: data.isGlutenFree ?? false,
+      isKosher: data.isKosher ?? false,
+      isWine: data.isWine ?? false,
+      hasTobacco: data.hasTobacco ?? false,
+      hasCannabis: data.hasCannabis ?? false,
+      isReturnable: data.isReturnable ?? true,
+      isPerishable: data.isPerishable ?? false,
+      allergenInfo: data.allergenInfo ?? "",
+      nutritionalInfo: data.nutritionalInfo ?? "",
+      active: data.isActive ?? true,
+    }),
 
-  updateProduct: async (uuid: string, data: Partial<Product>) => apiCall<Product>("PATCH", `/products/${uuid}`, data),
-  deleteProduct: async (uuid: string) => apiCall<void>("DELETE", `/products/${uuid}`),
+  updateProduct: async (uuid: string, data: Partial<Product>) =>
+    apiCall<Product>("PATCH", `/products/${uuid}`, {
+      productName: data.productName,
+      description: data.description ?? "",
+      brand: data.brand,
+      categoryName: data.categoryName,
+      taxCategory: data.taxCategory ?? "General",
+      isAlcoholic: data.isAlcoholic ?? false,
+      isGlutenFree: data.isGlutenFree ?? false,
+      isKosher: data.isKosher ?? false,
+      isWine: data.isWine ?? false,
+      hasTobacco: data.hasTobacco ?? false,
+      hasCannabis: data.hasCannabis ?? false,
+      isReturnable: data.isReturnable ?? true,
+      isPerishable: data.isPerishable ?? false,
+      allergenInfo: data.allergenInfo ?? "",
+      nutritionalInfo: data.nutritionalInfo ?? "",
+      active: data.isActive ?? true,
+    }),
 
-  // --- Variants ---
-createVariant: async (productId: number, data: unknown) => 
-  apiCall<ProductVariant>("POST", `/products/${productId}/variants`, data),
+  deleteProduct: async (uuid: string) => apiCall<void>("DELETE", `/products/${uuid}`),
 
-updateVariant: async (variantId: string, data: unknown) => 
+  createVariant: async (productId: string, data: unknown) =>
+    apiCall<ProductVariant>("POST", `/products/${productId}/variants`, data),
+
+  updateVariant: async (variantId: string, data: unknown) => 
   apiCall<ProductVariant>("PATCH", `/products/variants/${variantId}`, data),
   
 deleteVariant: async (variantId: string) => 
@@ -332,4 +350,29 @@ getReports: async (
       `/stores-inventory/${storeUuid}/products${qs}`
     );
   },
+
+  // --- Store Cancel Reasons ---
+  getCancelReasons: async (): Promise<StoreCancelReasonResponseDTO[]> =>
+    apiCall<StoreCancelReasonResponseDTO[]>("GET", "/reasons"),
+
+  getCancelReason: async (id: number): Promise<StoreCancelReasonResponseDTO> =>
+    apiCall<StoreCancelReasonResponseDTO>("GET", `/reasons/${id}`),
+
+  createCancelReason: async (data: StoreCancelReasonRequestDTO): Promise<StoreCancelReasonResponseDTO> =>
+    apiCall<StoreCancelReasonResponseDTO>("POST", "/reasons", data),
+
+  updateCancelReason: async (id: number, data: StoreCancelReasonRequestDTO): Promise<StoreCancelReasonResponseDTO> =>
+    apiCall<StoreCancelReasonResponseDTO>("PATCH", `/reasons/${id}`, data),
+
+  deleteCancelReason: async (id: number): Promise<void> =>
+    apiCall<void>("DELETE", `/reasons/${id}`),
+
+
+  // Fetch audit logs by date range (admin endpoint already present on backend)
+  getAuditLogsByDateRange: async (startIso: string, endIso: string): Promise<AuditLog[]> => {
+    const qs = `?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`;
+    // backend returns an array of AuditLog objects
+    return apiCall<AuditLog[]>("GET", `/api/audit-logs/date-range${qs}`);
+  },
+
 };

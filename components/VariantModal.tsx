@@ -188,7 +188,7 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
       } else {
         // Create new variant
         if (!productId) throw new Error("Numeric productId is missing");
-        savedVariant = await apiService.createVariant(productId, currentVariant);
+        savedVariant = await apiService.createVariant(productId.toString(), currentVariant);
         setVariants((prev) => [...prev, savedVariant]);
 
         // Notify parent — parent will show "Variant added successfully!"

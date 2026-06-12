@@ -29,6 +29,27 @@ function parseApiError(err: any) {
 }
 
 /* -------------------- Small UI primitives (modals/toasts) -------------------- */
+/* InfoModal — simple single-button informational modal */
+const InfoModal = ({ open, title, message, onClose }: {
+  open: boolean;
+  title?: string;
+  message: string;
+  onClose: () => void;
+}) => {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div className="bg-white p-5 rounded-xl shadow-2xl w-[520px] max-w-full">
+        {title && <h3 className="text-lg font-bold mb-2">{title}</h3>}
+        <p className="text-sm text-gray-700 mb-4">{message}</p>
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700">OK</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ConfirmModal = ({ open, title, message, onCancel, onConfirm }: {
   open: boolean; title?: string; message: string; onCancel: () => void; onConfirm: () => void;
 }) => {
@@ -66,7 +87,7 @@ const OrderDetailsDialog = ({ order }: { order: Order }) => {
         <div>
           <p className="mb-2"><strong>Customer:</strong> {order.userName}</p>
           <p className="mb-2"><strong>Address:</strong> <span className="text-gray-600">{order.address ?? "—"}</span></p>
-          <p className="mb-2"><strong>Order Status:</strong> <span className="text-gray-600">{order.orderStatus}</span></p>
+          <p className="mb-2"><strong>Order Status:</strong> <span className="text-gray-600">{order.refundStatus}</span></p>
           <p className="mb-2"><strong>Items:</strong> <span className="text-gray-600">{order.itemOrderedCount ?? (order.items?.length ?? 0)}</span></p>
         </div>
 
@@ -190,9 +211,13 @@ const FullRefundDetail = ({ order, onBack, onProcessRefund }: {
       <OrderDetailsDialog order={order} />
 
       <div className="mt-8 pt-4 border-t flex justify-end">
-        <button onClick={() => setShowConfirm(true)} disabled={loading} className="px-6 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 disabled:opacity-50 transition">
-          {loading ? "Processing..." : `Process Full Refund ($${fmt(order.originalTotal)})`}
-        </button>
+        <button
+          onClick={() => setShowConfirm(true)}
+          disabled={loading || ((order.refundStatus ?? "").toString().toUpperCase() === 'FULL_REFUND')}
+          className="px-6 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 disabled:opacity-50 transition"
+        >
+        {loading ? "Processing..." : `Process Full Refund ($${fmt(order.originalTotal)})`}
+      </button>
       </div>
 
       <ConfirmModal open={showConfirm} title="Confirm Full Refund"
@@ -203,7 +228,7 @@ const FullRefundDetail = ({ order, onBack, onProcessRefund }: {
 };
 
 /* -------------------- PartialRefundDetail (small change: use toast through window event) -------------------- */
-type RefundItem = { id: number; name: string; price?: number; finalPrice?: number; storeUuid?: string; storeName?: string };
+type RefundItem = { id: number; name: string; price?: number; finalPrice?: number; storeUuid?: string; storeName?: string, isRefunded: boolean };
 
 const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
   order: Order;
@@ -218,7 +243,8 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
         price: i.price,
         finalPrice: i.finalPrice,
         storeUuid: store.storeUuid,
-        storeName: store.storeName
+        storeName: store.storeName,
+        isRefunded: !!i.isRefunded
       }))
     ), [order]);
 
@@ -233,9 +259,14 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
   const [refundTip, setRefundTip] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  const toggleItem = (id: number) => setSelectedItemIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
+  const toggleItem = (id: number) => {
+    const it = allItems.find(x => x.id === id);
+    if (it?.isRefunded) return; // ignore clicks for already refunded items
+    setSelectedItemIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
   const itemsByStore = useMemo(() => {
     const map: Record<string, RefundItem[]> = {};
     (order.stores ?? []).forEach(s => { map[s.storeUuid] = []; });
@@ -268,18 +299,36 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
     return total;
   }, [totalItemRefund, totalDeliveryRefund, refundTip, order.tip, order.totalCheckoutBagFee]);
 
-  const handleProcessPartialRefund = async () => {
-    if (totalRefundAmount === 0) {
-      // dispatch module-level toast instead of alert()
-      window.dispatchEvent(new CustomEvent("ordersModuleAlert", { detail: { message: "Select items, or enable refund of delivery fee / tip.", type: "error" } }));
-      return;
-    }
-    setShowConfirm(false);
-    setLoading(true);
-    try {
-      await onProcessRefund(order.orderShortId ?? order.orderUuid, selectedItemIds, refundDeliveryFee, refundTip);
-    } finally { setLoading(false); }
-  };
+  // remaining refundable amount (non-negative)
+  const remainingRefundable = useMemo(() => {
+    console.log("refundamount",order.refundAmount);
+    return Math.max(0, (order.originalTotal ?? 0) - (order.refundAmount ?? 0));
+  }, [order.originalTotal, order.refundAmount]);
+
+
+  useEffect(() => {
+      if (totalRefundAmount === 0) {
+        setValidationError("Select items, or enable refund of delivery fee / tip.");
+      } else if (totalRefundAmount > remainingRefundable) {
+        setValidationError(`Refund amount cannot exceed remaining refundable amount of $${fmt(remainingRefundable)}.`);
+      } else {
+        setValidationError(null);
+      }
+    }, [totalRefundAmount, remainingRefundable]);
+
+    const handleConfirmPartialRefund = async () => {
+      if (validationError) return;
+
+      setShowConfirm(false);
+      setLoading(true);
+      try {
+        await onProcessRefund(order.orderShortId ?? order.orderUuid, selectedItemIds, refundDeliveryFee, refundTip);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-5xl mx-auto my-8">
@@ -292,7 +341,7 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
 
       <div className="mt-8 border-t pt-6 grid grid-cols-1 md:grid-cols-2 gap-8">
         <div>
-          <h4 className="text-lg font-semibold mb-3">Select Items to Refund (grouped by store)</h4>
+          <h4 className="text-lg font-semibold mb-3">Select Items to Refund</h4>
 
           <div className="space-y-4">
             {(order.stores ?? []).map(s => (
@@ -307,15 +356,27 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
                 </div>
 
                 <div className="max-h-48 overflow-y-auto border-t pt-2">
+                  
                   {(itemsByStore[s.storeUuid] || []).length > 0 ? (itemsByStore[s.storeUuid] || []).map(item => (
                     <div key={item.id} className="flex items-center justify-between gap-2 py-2 border-b last:border-b-0">
-                      <label className="text-sm cursor-pointer flex-grow">{item.name}</label>
+                      <label className={`text-sm cursor-pointer flex-grow ${item.isRefunded ? 'line-through text-gray-400' : ''}`}>
+                        {item.name}
+                        {item.isRefunded && <span className="ml-2 text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded">Refunded</span>}
+                      </label>
                       <div className="flex items-center gap-3">
                         <span className="text-xs text-gray-500">${fmt(item.finalPrice)}</span>
-                        <input type="checkbox" checked={selectedItemIds.includes(item.id)} onChange={() => toggleItem(item.id)} className="w-4 h-4 text-yellow-600 border-gray-300 rounded" />
+                        <input
+                          type="checkbox"
+                          checked={selectedItemIds.includes(item.id)}
+                          onChange={() => toggleItem(item.id)}
+                          className="w-4 h-4 text-yellow-600 border-gray-300 rounded"
+                          disabled={item.isRefunded}
+                          aria-disabled={item.isRefunded}
+                        />
                       </div>
                     </div>
                   )) : <p className="text-sm text-gray-500">No refundable items for this store.</p>}
+
                 </div>
               </div>
             ))}
@@ -339,7 +400,14 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
           <h4 className="text-lg font-bold mb-3 text-yellow-700">Refund Summary</h4>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between"><span>Original Total:</span><span className="font-semibold">${fmt(order.originalTotal)}</span></div>
-            <div className="flex justify-between"><span>Refunded Previously:</span><span className="font-semibold text-red-600">-${fmt(order.refundAmount)}</span></div>
+            <div className="flex justify-between">
+              <span>Refunded Previously:</span>
+              <span className="font-semibold text-red-600">-${fmt(order.refundAmount)}</span></div>
+            <div className="flex justify-between text-sm text-gray-700">
+              <span>Remaining Refundable:</span>
+              <span className="font-semibold text-red-600">${fmt(remainingRefundable)}</span>
+            </div>
+
             <hr className="my-2"/>
             <div className="flex justify-between text-base font-semibold"><span>Items Selected:</span><span className="text-yellow-700">${fmt(totalItemRefund)}</span></div>
 
@@ -364,12 +432,25 @@ const PartialRefundDetail = ({ order, onBack, onProcessRefund }: {
       </div>
 
       <div className="mt-8 pt-4 border-t flex justify-end">
-        <button onClick={() => setShowConfirm(true)} disabled={loading || totalRefundAmount === 0} className="px-6 py-3 bg-yellow-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 disabled:opacity-50 transition">
-          {loading ? "Processing..." : "Process Partial Refund"}
-        </button>
+        <div className="mt-8 pt-4 border-t">
+        {validationError && (
+          <div className="mb-3 text-sm text-red-700 border rounded p-2 bg-red-50">{validationError}</div>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            onClick={() => setShowConfirm(true)}
+            disabled={loading || totalRefundAmount === 0 || !!validationError}
+            className="px-6 py-3 bg-yellow-600 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-700 disabled:opacity-50 transition"
+          >
+            {loading ? "Processing..." : "Process Partial Refund"}
+          </button>
+        </div>
       </div>
 
-      <ConfirmModal open={showConfirm} title="Confirm Partial Refund" message={`Are you sure you want to process a PARTIAL refund for order ${order.orderShortId ?? order.orderUuid}?`} onCancel={() => setShowConfirm(false)} onConfirm={handleProcessPartialRefund} />
+      </div>
+
+      <ConfirmModal open={showConfirm} title="Confirm Partial Refund" message={`Are you sure you want to process a PARTIAL refund for order ${order.orderShortId ?? order.orderUuid}?`} onCancel={() => setShowConfirm(false)} onConfirm={handleConfirmPartialRefund} />
     </div>
   );
 };
@@ -483,6 +564,10 @@ export function OrdersModule() {
   // network online/offline state for helpful UI
   const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== "undefined" ? navigator.onLine : true));
 
+  //refund info and
+  const [showAlreadyRefundedInfo, setShowAlreadyRefundedInfo] = useState(false);
+  const tempOrderRef = useRef<Order | null>(null);
+
   useEffect(() => {
     function onOnline() { setIsOnline(true); }
     function onOffline() { setIsOnline(false); }
@@ -560,6 +645,14 @@ export function OrdersModule() {
     setLoading(true); setAlert(null);
     try {
       const full = await apiService.getTrackedOrder(orderShortId);
+
+      const status = (full?.refundStatus ?? "").toString().toUpperCase();
+      if (pendingRefundType === 'full' && status === 'FULL_REFUND') {
+        tempOrderRef.current = full;
+        setShowAlreadyRefundedInfo(true);
+        return;
+      }
+
       setSelectedOrder(full);
       setView(pendingRefundType === 'full' ? 'full_detail' : 'partial_detail');
     } catch (err) {
@@ -570,8 +663,11 @@ export function OrdersModule() {
       } else {
         setAlert({ message: `Failed to load order details: ${message}`, type: 'error' });
       }
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [pendingRefundType, isOnline]);
+
 
   const handleBackToLanding = () => {
     setOrders([]); setSelectedOrder(null); setPendingRefundType(null); setView('landing'); setAlert(null);
@@ -677,6 +773,21 @@ export function OrdersModule() {
             </div>
           </div>
         )}
+
+        {/* Info modal shown when the order is already fully refunded */}
+        <InfoModal
+          open={showAlreadyRefundedInfo}
+          title="Order Already Refunded"
+          message={`Order id: ${tempOrderRef.current?.orderShortId ?? (tempOrderRef.current?.orderUuid ?? "")} is already refunded.`}
+          onClose={() => {
+            setShowAlreadyRefundedInfo(false);
+            if (tempOrderRef.current) {
+              setSelectedOrder(tempOrderRef.current);
+              setView('full_detail');
+              tempOrderRef.current = null;
+            }
+          }}
+        />
 
         {/* Filter toolbar (visible on list view only) */}
         <div className="flex flex-col md:flex-row items-center gap-3 mb-4">

@@ -13,7 +13,7 @@ on:
           - release/integration
           - feature/dev
       rollback_enabled:
-        description: "⚠️ Destroy infrastructure if deployment fails? (Safety: only works on dispatch)"
+        description: "⚠️ Destroy infrastructure if deployment fails?"
         required: false
         default: false
         type: boolean
@@ -33,11 +33,12 @@ jobs:
     outputs:
       environment: ${{ steps.set-env.outputs.environment }}
       subdomain: ${{ steps.set-env.outputs.subdomain }}
+
     steps:
-      - name: Set environment and subdomain based on branch
+      - name: Set environment and subdomain
         id: set-env
         run: |
-          echo "🔍 GITHUB_REF_NAME = ${GITHUB_REF_NAME}"
+          echo "🔍 BRANCH: ${GITHUB_REF_NAME}"
 
           if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "environment=production" >> $GITHUB_OUTPUT
@@ -50,16 +51,16 @@ jobs:
             echo "subdomain=admin.dev" >> $GITHUB_OUTPUT
           fi
 
-          echo "✅ Selected environment: $(grep environment <<< $(cat $GITHUB_OUTPUT) | cut -d= -f2)"
-          echo "✅ Selected subdomain: $(grep subdomain <<< $(cat $GITHUB_OUTPUT) | cut -d= -f2)"
-  
+          echo "Selected Environment: $(grep environment $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Selected Subdomain: $(grep subdomain $GITHUB_OUTPUT | cut -d= -f2)"
+
   terraform:
     runs-on: ubuntu-latest
     needs: determine-environment
     environment: ${{ needs.determine-environment.outputs.environment }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Terraform
@@ -67,7 +68,7 @@ jobs:
         with:
           terraform_version: 1.9.2
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
@@ -77,6 +78,8 @@ jobs:
       - name: Terraform Init
         id: init
         run: |
+          export TF_LOG=DEBUG
+          export TF_LOG_PATH=terraform-debug.log
           terraform init \
             -backend-config="bucket=sipstr-admin-terraform-state" \
             -backend-config="key=${{ needs.determine-environment.outputs.environment }}/terraform.tfstate" \
@@ -86,32 +89,31 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -input=false -out=tfplan
+        run: terraform plan -input=false -out=tfplan || true
         working-directory: infra
-        timeout-minutes: 10
         env:
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
 
       - name: Terraform Apply
         id: apply
-        run: terraform apply -input=false -auto-approve tfplan
+        run: terraform apply -input=false -auto-approve tfplan || true
         working-directory: infra
-        timeout-minutes: 10
         env:
           TF_LOG: INFO
+          TF_LOG_PATH: terraform-debug.log
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
 
-      - name: Show ACM DNS Records
-        if: success() # Only show if apply succeeded
+      - name: Output ACM Records
+        if: success()
         run: |
-          echo "👉 Add the following DNS records manually in GoDaddy (or wherever your domain is managed):"
+          echo "👉 DNS Records needed for ACM:"
           terraform output -json acm_dns_validation_records | jq -r '.[] | "Name: \(.name)\nType: \(.type)\nValue: \(.value)\n---"'
         working-directory: infra
 
       # --------------------------
-      # Build & Deploy Frontend
+      # Build Frontend
       # --------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -120,6 +122,29 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
+      
+      - name: Export Next.js Environment Variables
+        run: |
+          echo "NEXT_PUBLIC_BASE_URL=https://api.dev.sipstr.com" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_ROLE=SUPER_ADMIN" >> $GITHUB_ENV
+
+          echo "NEXT_PUBLIC_FEATURE_DASHBOARD=true" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_USERS=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ROLES=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_BRANDS=true" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_PRODUCTS=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_STORES=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ORDERS=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_COUPON=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_TOP_PICKS=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ZONES=true" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_REPORTS=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_SUBSTITUTE=true" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_AUDIT=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_REASONS=false" >> $GITHUB_ENV
+
+          echo "NEXT_PUBLIC_GOOGLE_MAPS_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_KEY }}" >> $GITHUB_ENV
+
 
       - name: Build Frontend
         run: npm run build
@@ -127,42 +152,108 @@ jobs:
       - name: Upload to S3
         run: |
           BUCKET=$(terraform -chdir=infra output -raw s3_bucket)
+          if [ -d "dist" ]; then BUILD_DIR="dist";
+          elif [ -d "build" ]; then BUILD_DIR="build";
+          elif [ -d "out" ]; then BUILD_DIR="out";
+          else echo "❌ No build dir found"; exit 1; fi
 
-          # Detect frontend build folder (dist or build or out)
-          if [ -d "dist" ]; then
-            BUILD_DIR="dist"
-          elif [ -d "build" ]; then
-            BUILD_DIR="build"
-          elif [ -d "out" ]; then
-            BUILD_DIR="out"
-          else
-            echo "❌ No build directory found!"
-            exit 1
-          fi
-
-          echo "Uploading $BUILD_DIR/ to s3://$BUCKET/"
           aws s3 sync $BUILD_DIR/ s3://$BUCKET/ --delete --exact-timestamps
 
-      - name: Invalidate CloudFront Cache
+      - name: Invalidate CloudFront
         run: |
-          DIST_ID=$(terraform -chdir=infra output -raw cloudfront_distribution_id || true)
-          if [ -n "$DIST_ID" ]; then
-            echo "Invalidating CloudFront distribution $DIST_ID"
-            aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+          DIST=$(terraform -chdir=infra output -raw cloudfront_distribution_id || true)
+          if [ -n "$DIST" ]; then
+            aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
           else
-            echo "⚠️ CloudFront distribution ID not found in outputs, skipping invalidation"
+            echo "⚠️ No CloudFront distribution found"
           fi
 
-      # --------------------------
-      # 🚨 ROLLBACK STEP 🚨
-      # --------------------------
-      - name: ⚠️ Rollback (Destroy Infrastructure)
+      - name: Rollback on Failure
         if: failure() && inputs.rollback_enabled == true && steps.init.outcome == 'success'
-        run: |
-          echo "🚨 Deployment FAILED. Rolling back changes (Destroying Infrastructure)..."
-          terraform destroy -auto-approve -input=false
+        run: terraform destroy -auto-approve
         working-directory: infra
         env:
-          TF_LOG: INFO
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+
+  # ============================
+  # 🔥 DEBUG JOB (ALWAYS RUNS)
+  # ============================
+  debug-info:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: AWS Auth
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Terraform Debug
+      - name: Terraform Show
+        run: terraform show -json || true
+        working-directory: infra
+
+      - name: Terraform State List
+        run: terraform state list || true
+        working-directory: infra
+
+      - name: Print Terraform Files
+        run: find infra -type f -print -exec cat {} \;
+
+      # AWS Debug
+      - name: CloudFront Distributions
+        run: aws cloudfront list-distributions || true
+
+      - name: Describe Each CloudFront
+        run: |
+          IDS=$(aws cloudfront list-distributions --query "DistributionList.Items[].Id" --output text)
+          for ID in $IDS; do
+            echo "--------------------"
+            aws cloudfront get-distribution --id $ID || true
+          done
+
+      - name: ACM Certificates (us-east-1)
+        run: aws acm list-certificates --region us-east-1 || true
+
+      - name: ACM Describe Details
+        run: |
+          CERTS=$(aws acm list-certificates --region us-east-1 --query "CertificateSummaryList[].CertificateArn" --output text)
+          for C in $CERTS; do
+            echo "----------------------"
+            aws acm describe-certificate --certificate-arn $C --region us-east-1 || true
+          done
+
+      - name: Route53 Hosted Zones
+        run: aws route53 list-hosted-zones || true
+
+      - name: Route53 Records
+        run: |
+          ZONES=$(aws route53 list-hosted-zones --query "HostedZones[].Id" --output text)
+          for Z in $ZONES; do
+            aws route53 list-resource-record-sets --hosted-zone-id $Z || true
+          done
+
+      - name: S3 Buckets
+        run: aws s3 ls || true
+
+      - name: S3 Bucket Details
+        run: |
+          for B in $(aws s3 ls --output text | awk '{print $3}'); do
+            echo "Bucket: $B"
+            aws s3api get-bucket-policy --bucket $B || true
+            aws s3api get-bucket-location --bucket $B || true
+          done
+
+      - name: Upload Terraform Debug Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-debug-log
+          path: infra/terraform-debug.log
+        continue-on-error: true

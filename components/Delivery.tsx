@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { deliveryZoneService } from "../services/deliveryZone";
-import { apiService } from "../services/apiService"; // <-- new: used to fetch stores
-import { DeliveryZone, CreateDeliveryZoneRequest } from "../services/types";
+import { apiService } from "../services/apiService";
+import type { DeliveryZone, CreateDeliveryZoneRequest } from "../services/types";
+import MapPreviewGoogle from "../googlemap/MapPreviewGoogle";
 
+/* ----------------- parseKmlToPlacemarks (unchanged) ----------------- */
 function parseKmlToPlacemarks(kmlText: string) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(kmlText, "application/xml");
@@ -23,26 +25,17 @@ function parseKmlToPlacemarks(kmlText: string) {
     const k = rawKey.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
     const map: Record<string, string> = {
       zonename: "zoneName",
-      "zone": "zoneName",
+      zone: "zoneName",
       name: "zoneName",
-
       basefee: "baseDeliveryFee",
-      "base delivery fee": "baseDeliveryFee",
-      basedeliveryfee: "baseDeliveryFee",
-
-      permilefee: "perMileFee",
-      "per mile fee": "perMileFee",
+      "basedeliveryfee": "baseDeliveryFee",
+      "permilefee": "perMileFee",
       permile: "perMileFee",
-
       minorder: "minOrderAmount",
-      "min order": "minOrderAmount",
       minorderamount: "minOrderAmount",
-
       estpreptime: "estimatedPreparationTime",
       estprep: "estimatedPreparationTime",
-      "est prep": "estimatedPreparationTime",
-      "estimated preparation time": "estimatedPreparationTime",
-
+      estimatedpreparationtime: "estimatedPreparationTime",
       restricted: "isRestricted",
       isrestricted: "isRestricted",
       allow: "isRestricted",
@@ -53,19 +46,15 @@ function parseKmlToPlacemarks(kmlText: string) {
   const parseValue = (val: string) => {
     const v = String(val).trim();
     if (!v) return v;
-
     const low = v.toLowerCase();
     if (low === "yes" || low === "true") return true;
     if (low === "no" || low === "false") return false;
-
     const withoutUnits = v.replace(/\b(mins?|minutes?)\b/gi, "").trim();
-
     const numCandidate = withoutUnits.match(/-?\d+(\.\d+)?/);
     if (numCandidate) {
       const n = Number(numCandidate[0]);
       if (!Number.isNaN(n)) return n;
     }
-
     return v;
   };
 
@@ -154,242 +143,257 @@ function parseKmlToPlacemarks(kmlText: string) {
   return parsed;
 }
 
+/* ----------------- Helpers for placemark UI ----------------- */
+function labelForKey(k: string) {
+  const map: Record<string, string> = {
+    zoneName: "Zone",
+    baseDeliveryFee: "Base Fee",
+    perMileFee: "Per Mile",
+    minOrderAmount: "Min Order",
+    estimatedPreparationTime: "Est Prep (mins)",
+    isRestricted: "Restricted",
+  };
+  return map[k] ?? k;
+}
+function formatValueForKey(key: string, value: any) {
+  if (value == null || value === "") return "-";
+  if (key === "isRestricted") return value ? "Yes" : "No";
+  if (typeof value === "number") return value;
+  return String(value);
+}
 
-export default function DeliveryZonesPage() {
-  // storeName (user-friendly) + resolved selected store
-  const [storeName, setStoreName] = useState(""); // <-- user types the store name
-  const [stores, setStores] = useState<{ uuid: string; storeName: string }[]>([]); // fetched stores list
-  const [selectedStoreUuid, setSelectedStoreUuid] = useState<string | null>(null); // resolved uuid
+/* ------------------ AlertDialog (copied & adapted from TopPicksModule) ------------------ */
+type CustomAlert = {
+  isOpen: boolean;
+  message: string;
+  isConfirm: boolean;
+  onConfirm?: () => Promise<void> | void;
+  onCancel?: () => void;
+};
 
-  // control dropdown visibility
-  const [showSuggestions, setShowSuggestions] = useState(true);
+const alertStyles = {
+  overlay: {
+    position: "fixed" as const,
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999,
+    background: "rgba(0,0,0,0.35)",
+    padding: 16,
+  },
+  dialog: {
+    width: 420,
+    maxWidth: "100%",
+    background: "#fff",
+    borderRadius: 10,
+    padding: 20,
+    boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
+  },
+  title: {
+    marginBottom: 8,
+    fontSize: 18,
+    fontWeight: 700,
+    color: "#222",
+  },
+  message: {
+    marginBottom: 18,
+    color: "#333",
+    lineHeight: 1.35,
+  },
+  actions: (isConfirm: boolean) => ({
+    display: "flex",
+    gap: 10,
+    justifyContent: isConfirm ? "flex-end" : "center",
+  }),
+  cancelButton: {
+    padding: "8px 12px",
+    borderRadius: 6,
+    border: "1px solid #ccc",
+    background: "#fff",
+    cursor: "pointer",
+  },
+  confirmButton: {
+    padding: "8px 14px",
+    borderRadius: 6,
+    border: "none",
+    background: "#FF6600",
+    color: "#fff",
+    cursor: "pointer",
+    fontWeight: 600,
+    boxShadow: "0 4px 12px rgba(255,102,0,0.12)",
+  },
+};
+
+const AlertDialog: React.FC<{ alert: CustomAlert; onClose: () => void }> = ({ alert, onClose }) => {
+  if (!alert.isOpen) return null;
+
+  const handleConfirm = async () => {
+    if (alert.onConfirm) await alert.onConfirm();
+    onClose();
+  };
+
+  const handleCancel = () => {
+    alert.onCancel?.();
+    onClose();
+  };
+
+  return (
+    <div role={alert.isConfirm ? "dialog" : "alertdialog"} aria-modal="true" style={alertStyles.overlay} onClick={onClose}>
+      <div style={alertStyles.dialog} onClick={(e) => e.stopPropagation()}>
+        <div style={alertStyles.title}>{alert.isConfirm ? "Please confirm" : "Notice"}</div>
+        <div style={alertStyles.message}>{alert.message}</div>
+        <div style={alertStyles.actions(alert.isConfirm)}>
+          {alert.isConfirm && (
+            <button onClick={handleCancel} style={alertStyles.cancelButton}>
+              Cancel
+            </button>
+          )}
+          <button onClick={handleConfirm} style={alertStyles.confirmButton}>
+            {alert.isConfirm ? "Confirm" : "OK"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ----------------- Component ----------------- */
+export default function DeliveryZonesAdmin() {
+  const [storeName, setStoreName] = useState("");
+  const [stores, setStores] = useState<{ uuid: string; storeName: string }[]>([]);
+  const [selectedStoreUuid, setSelectedStoreUuid] = useState<string | null>(null);
 
   const [zones, setZones] = useState<DeliveryZone[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<string>("");
 
-  // Modal state
   const [showModal, setShowModal] = useState(false);
-  const [editZone, setEditZone] = useState<DeliveryZone | null>(null);
+  const [parsedPlacemarks, setParsedPlacemarks] = useState<any[]>([]);
+  const [parsingError, setParsingError] = useState<string | null>(null);
+  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
+  const [isAddHover, setIsAddHover] = useState(false);
+
+  // editing states
+  const [editingPlacemarkIndex, setEditingPlacemarkIndex] = useState<number | null>(null);
+  const [editingZoneId, setEditingZoneId] = useState<number | null>(null);
+
   const [form, setForm] = useState<CreateDeliveryZoneRequest>({
     zoneName: "",
     baseDeliveryFee: 0,
     perMileFee: 0,
     minOrderAmount: 0,
     estimatedPreparationTime: 0,
-    isRestricted: false,
+    restricted: false,
     coordinates: [[0, 0]],
     storeUuid: "",
   });
 
-  // Parsed KML placemarks from uploaded file
-  const [parsedPlacemarks, setParsedPlacemarks] = useState<any[]>([]);
-  const [parsingError, setParsingError] = useState<string | null>(null);
-  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null); // index being created
+  /* --- Alert state & helpers (from TopPicks) --- */
+  const [customAlert, setCustomAlert] = useState<CustomAlert>({ isOpen: false, message: "", isConfirm: false });
+  const showAlert = (message: string, isConfirm = false, onConfirm?: () => Promise<void> | void, onCancel?: () => void) => {
+    setCustomAlert({ isOpen: true, message, isConfirm, onConfirm, onCancel });
+  };
+  const closeAlert = () => setCustomAlert((s) => ({ ...s, isOpen: false }));
 
-  // --- Styles (kept same) ---
-  const styles = {
-    container: { maxWidth: "900px", margin: "0 auto", padding: "16px", fontFamily: "'Segoe UI', sans-serif" },
-    input: { padding: "8px", borderRadius: "4px", border: "1px solid #FF6600" },
-    button: { padding: "8px 16px", borderRadius: "4px", border: "none", backgroundColor: "#FF6600", color: "#fff", cursor: "pointer" },
-    table: { width: "100%", borderCollapse: "collapse" }, // Removed unnecessary 'as const'
-    th: { border: "1px solid #FF6600", padding: "8px", backgroundColor: "#FF6600", color: "#fff" },
-    td: { border: "1px solid #FF6600", padding: "8px", backgroundColor: "#fff", color: "#333" },
-    modalOverlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center" }, // Removed unnecessary 'as const'
-    modalContent: { backgroundColor: "#fff", padding: "24px", borderRadius: "8px", width: "550px", maxHeight: "80vh", overflowY: "auto", overflowX:"hidden" },
-    modalInput: { padding: "8px", borderRadius: "4px", border: "1px solid #FF6600" },
-    modalButton: { padding: "8px 16px", borderRadius: "4px", border: "none", backgroundColor: "#FF6600", color: "#fff", cursor: "pointer" },
-    coordinateRow: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" },
-    coordinateInput: { width: "100px", padding: "6px", borderRadius: "4px", border: "1px solid #FF6600" },
-    removeCoordBtn: { padding: "4px 8px", borderRadius: "4px", border: "none", backgroundColor: "#FF6600", color: "#fff", cursor: "pointer" , marginRight: "8px"},
-    label: { display: "flex", flexDirection: "column", marginBottom: "8px", fontWeight: "bold" }
-} as const; // <-- The fix is here!
-
-  // Fetch stores list once (for resolving storeName -> storeUuid)
+  /* --- Load stores --- */
   useEffect(() => {
     let mounted = true;
-    const loadStores = async () => {
+    const load = async () => {
       try {
-        const res = await apiService.getStores(); // uses your existing api client
-        // res likely is Store[]; map to { uuid, storeName } shape
+        const res = await apiService.getStores();
         if (!mounted) return;
-        const mapped = (res as any[]).map((s) => ({ uuid: s.uuid ?? s.storeUuid ?? s.storeId ?? s.id, storeName: s.storeName ?? s.name ?? s.store_name ?? s.name }));
+        const mapped = (res as any[]).map((s) => ({
+          uuid: s.uuid ?? s.storeUuid ?? s.storeId ?? s.id,
+          storeName: s.storeName ?? s.name ?? s.store_name ?? s.name,
+        }));
         setStores(mapped);
       } catch (err) {
-        console.warn("Failed to fetch stores for name resolution", err);
+        console.warn("failed to load stores", err);
       }
     };
-    loadStores();
-    return () => { mounted = false; };
+    load();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Resolve selected store UUID when user picks/enters a storeName
+  /* --- storeName -> uuid resolution --- */
   useEffect(() => {
     if (!storeName.trim()) {
       setSelectedStoreUuid(null);
       return;
     }
-    // try exact match first, case-insensitive
     const exact = stores.find((s) => s.storeName?.toLowerCase() === storeName.trim().toLowerCase());
     if (exact) {
       setSelectedStoreUuid(exact.uuid);
       return;
     }
-    // try prefix match
     const prefix = stores.find((s) => s.storeName?.toLowerCase().startsWith(storeName.trim().toLowerCase()));
     if (prefix) {
       setSelectedStoreUuid(prefix.uuid);
       return;
     }
-    // no match
     setSelectedStoreUuid(null);
   }, [storeName, stores]);
 
-  // Fetch zones - same as before but uses selectedStoreUuid now
+  /* --- Fetch zones --- */
   const fetchZones = async () => {
     if (!selectedStoreUuid) {
-      setError("Please select a valid store to fetch zones");
+      setError("Select a valid store first");
+      showAlert("Select a valid store first");
       return;
     }
-    setLoading(true);
     setError("");
+    setLoading(true);
     try {
       const data = await deliveryZoneService.getDeliveryZones(selectedStoreUuid);
-      setZones(data);
+      setZones(data || []);
     } catch (err) {
       console.error(err);
-      setError("Failed to fetch zones");
+      showAlert("Failed to fetch zones.");
     } finally {
       setLoading(false);
     }
   };
 
-  const openAddModal = () => {
-    setEditZone(null);
-    setForm({
-      zoneName: "",
-      baseDeliveryFee: 0,
-      perMileFee: 0,
-      minOrderAmount: 0,
-      estimatedPreparationTime: 0,
-      isRestricted: false,
-      coordinates: [[0, 0]],
-      storeUuid: selectedStoreUuid ?? "",
-    });
-    setShowModal(true);
-  };
-
-  const openEditModal = (zone: DeliveryZone) => {
-    setEditZone(zone);
-    setForm({
-      zoneName: zone.zoneName,
-      baseDeliveryFee: zone.baseDeliveryFee,
-      perMileFee: zone.perMileFee,
-      minOrderAmount: zone.minOrderAmount,
-      estimatedPreparationTime: zone.estimatedPreparationTime ?? 0,
-      isRestricted: zone.isRestricted,
-      coordinates:zone.coordinates as [number, number][],
-      storeUuid: zone.storeUuid,
-    });
-
-    // Also pre-fill the top store input (if we know the store name)
-    if (zone.storeUuid) {
-      setSelectedStoreUuid(zone.storeUuid);
-      const matched = stores.find((s) => s.uuid === zone.storeUuid);
-      if (matched) {
-        setStoreName(matched.storeName);
-      }
-    }
-
-    // hide suggestions when editing
-    setShowSuggestions(false);
-
-    setShowModal(true);
-  };
-
-  const handleDelete = async (zone: DeliveryZone) => {
-    console.log("Full zone object:", zone);
-    if (!zone.zoneId) return;
-    if (!confirm(`Delete zone "${zone.zoneName}"?`)) return;
-    try {
-      setLoading(true);
-      await deliveryZoneService.deleteDeliveryZone(zone.zoneId.toString());
-      await fetchZones();
-    } catch (err) {
-      console.error(err);
-      setError("Failed to delete zone");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    try {
-      setLoading(true);
-      // ensure form.storeUuid is set (prefer form, else selectedStoreUuid)
-      const payload = { ...form, storeUuid: form.storeUuid || selectedStoreUuid || "" };
-      if (!payload.storeUuid) {
-        alert("Store UUID is missing. Please select a store name first.");
-        setLoading(false);
-        return;
-      }
-      if (editZone?.zoneId) {
-        await deliveryZoneService.updateDeliveryZone(editZone.zoneId.toString(), payload);
-      } else {
-        await deliveryZoneService.createDeliveryZone(payload);
-      }
-      setShowModal(false);
-      await fetchZones();
-    } catch (err) {
-      console.error(err);
-      setError("Failed to save zone");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCoordinateChange = (index: number, latOrLng: 0 | 1, value: number) => {
-    const newCoords = [...form.coordinates];
-    newCoords[index][latOrLng] = value;
-    setForm({ ...form, coordinates: newCoords });
-  };
-
-  const addCoordinate = () => {
-    setForm({ ...form, coordinates: [...form.coordinates, [0, 0]] });
-  };
-
-  const removeCoordinate = (index: number) => {
-    const newCoords = form.coordinates.filter((_, i) => i !== index);
-    setForm({ ...form, coordinates: newCoords });
-  };
-
+  /* --- File upload (KML) --- */
   const handleFileUpload = async (file: File | null) => {
     setParsingError(null);
     setParsedPlacemarks([]);
+    setEditingPlacemarkIndex(null);
     if (!file) return;
     const name = file.name || "";
-    const extMatch = name.toLowerCase().match(/\.(kml|kmz)$/);
-    if (!extMatch) {
-      setParsingError("Please enter a valid .kml or .kmz file");
+    const ext = name.split(".").pop()?.toLowerCase();
+    if (!ext || !["kml", "kmz"].includes(ext)) {
+      setParsingError("Please upload a .kml or .kmz file.");
+      setShowModal(true);
       return;
     }
-    if (name.toLowerCase().endsWith(".kmz")) {
-      setParsingError("KMZ files are not supported in this uploader yet. Please upload a .kml file.");
+
+    if (ext === "kmz") {
+      setParsingError("KMZ upload detected. KMZ is not supported in-browser yet. Please extract KML or upload .kml.");
+      setShowModal(true);
       return;
     }
+
     try {
       const text = await file.text();
       const parsed = parseKmlToPlacemarks(text);
-      if (parsed.length === 0) setParsingError("No placemarks found in KML");
+      if (!parsed.length) setParsingError("No placemarks found in KML");
       setParsedPlacemarks(parsed);
+      setShowModal(true);
+      setEditingPlacemarkIndex(null);
+      setEditingZoneId(null);
     } catch (err) {
       console.error(err);
-      setParsingError("Failed to parse KML");
+      setParsingError("Failed to parse KML file.");
+      setShowModal(true);
     }
   };
 
-  // Populate modal form from parsed placemark (and open modal)
-  const reviewPlacemark = (pm: any) => {
+  /* --- Review imported placemark --- */
+  const reviewPlacemark = (pm: any, idx: number) => {
     const coords = pm.coordinates.length ? pm.coordinates : [[0, 0]];
     const createReq: CreateDeliveryZoneRequest = {
       zoneName: pm.parsedDescription?.zoneName ?? pm.name ?? "Imported Zone",
@@ -397,316 +401,672 @@ export default function DeliveryZonesPage() {
       perMileFee: Number(pm.parsedDescription?.perMileFee ?? 0),
       minOrderAmount: Number(pm.parsedDescription?.minOrderAmount ?? 0),
       estimatedPreparationTime: Number(pm.parsedDescription?.estimatedPreparationTime ?? 0),
-      isRestricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
-      coordinates: coords, // already [lat, lng]
-      storeUuid: selectedStoreUuid ?? form.storeUuid ?? "", // <-- use selected store uuid
+      restricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
+      coordinates: coords,
+      storeUuid: selectedStoreUuid ?? "",
     };
-    setEditZone(null);
     setForm(createReq);
-    setShowModal(true);
+    setEditingPlacemarkIndex(idx);
+    setEditingZoneId(null);
   };
 
-  // Direct create from placemark without opening modal
+  /* --- Create/import a single placemark --- */
   const createFromPlacemark = async (pm: any, idx: number) => {
-    const resolvedUuid = selectedStoreUuid;
-    if (!resolvedUuid) {
-      alert("Please select a store (by name) before creating zones.");
+    if (!selectedStoreUuid) {
+      showAlert("Please select a store first.");
       return;
     }
     const coords = pm.coordinates.length ? pm.coordinates : [[0, 0]];
-    const createReq: CreateDeliveryZoneRequest = {
+    const payload: CreateDeliveryZoneRequest = {
       zoneName: pm.parsedDescription?.zoneName ?? pm.name ?? `Imported Zone ${idx + 1}`,
       baseDeliveryFee: Number(pm.parsedDescription?.baseDeliveryFee ?? 0),
       perMileFee: Number(pm.parsedDescription?.perMileFee ?? 0),
       minOrderAmount: Number(pm.parsedDescription?.minOrderAmount ?? 0),
       estimatedPreparationTime: Number(pm.parsedDescription?.estimatedPreparationTime ?? 0),
-      isRestricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
+      restricted: Boolean(pm.parsedDescription?.isRestricted ?? false),
       coordinates: coords,
-      storeUuid: resolvedUuid,
+      storeUuid: selectedStoreUuid!,
     };
 
     try {
       setUploadingIndex(idx);
-      await deliveryZoneService.createDeliveryZone(createReq);
-      // refresh zones
+      await deliveryZoneService.createDeliveryZone(payload);
       await fetchZones();
-      // remove created placemark from UI
-      setParsedPlacemarks((prev) => prev.filter((_, i) => i !== idx));
+      showAlert("Zone created successfully!");
+
+      setParsedPlacemarks((prev) => {
+        const next = prev.filter((_, i) => i !== idx);
+        if (next.length === 0) {
+          setShowModal(false);
+          setEditingPlacemarkIndex(null);
+        }
+        return next;
+      });
+
+      if (editingPlacemarkIndex === idx) {
+        setEditingPlacemarkIndex(null);
+        setForm({
+          zoneName: "",
+          baseDeliveryFee: 0,
+          perMileFee: 0,
+          minOrderAmount: 0,
+          estimatedPreparationTime: 0,
+          restricted: false,
+          coordinates: [[0, 0]],
+          storeUuid: "",
+        });
+      }
     } catch (err) {
       console.error(err);
-      alert("Failed to create delivery zone from placemark");
+      showAlert("Failed to create zone from placemark");
     } finally {
       setUploadingIndex(null);
     }
   };
 
-  // Handle bulk create (all parsed)
   const createAllPlacemarks = async () => {
     if (!selectedStoreUuid) {
-      alert("Please select a store (by name) before creating zones.");
+      showAlert("Please select a store first.");
       return;
     }
-    for (let i = 0; i < parsedPlacemarks.length; i++) {
-      // await sequentially to avoid flooding backend; you can parallelize if desired
-      // eslint-disable-next-line no-await-in-loop
-      await createFromPlacemark(parsedPlacemarks[i], i);
+    try {
+      for (let i = 0; i < parsedPlacemarks.length; i++) {
+        await createFromPlacemark(parsedPlacemarks[i], i);
+      }
+    } catch (err) {
+      console.error(err);
+      showAlert("Some placemarks may not have been created.");
+    } finally {
+      setParsedPlacemarks([]);
+      setEditingPlacemarkIndex(null);
+      setShowModal(false);
     }
   };
 
-  // utility: filter store names for dropdown suggestions
+  const handleSubmit = async () => {
+    if (!form.storeUuid && selectedStoreUuid) {
+      form.storeUuid = selectedStoreUuid;
+    }
+    if (!form.storeUuid) {
+      showAlert("Missing store UUID. Select a store first.");
+      return;
+    }
+    setLoading(true);
+    try {
+      if (editingZoneId != null) {
+        await deliveryZoneService.updateDeliveryZone(String(editingZoneId), form);
+        showAlert("Zone updated successfully!");
+      } else {
+        await deliveryZoneService.createDeliveryZone(form);
+        showAlert("Zone created successfully!");
+      }
+
+      setShowModal(false);
+      setParsedPlacemarks([]);
+      setEditingPlacemarkIndex(null);
+      setEditingZoneId(null);
+      await fetchZones();
+    } catch (err) {
+      console.error(err);
+      showAlert(editingZoneId != null ? "Failed to update delivery zone" : "Failed to create delivery zone");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (zone: DeliveryZone) => {
+    if (!zone.zoneId) return;
+    // replace browser confirm with our AlertDialog confirm
+    showAlert(`Delete zone "${zone.zoneName}"?`, true, async () => {
+      setLoading(true);
+      try {
+        await deliveryZoneService.deleteDeliveryZone(zone.zoneId!.toString());
+        showAlert("Zone deleted successfully!");
+        await fetchZones();
+      } catch (err) {
+        console.error(err);
+        showAlert("Failed to delete zone");
+      } finally {
+        setLoading(false);
+      }
+    });
+  };
+
+  const openEditForZone = (zone: DeliveryZone) => {
+    setForm({
+      zoneName: zone.zoneName,
+      baseDeliveryFee: zone.baseDeliveryFee,
+      perMileFee: zone.perMileFee,
+      minOrderAmount: zone.minOrderAmount,
+      estimatedPreparationTime: zone.estimatedPreparationTime ?? 0,
+      restricted: zone.restricted,
+      coordinates: zone.coordinates as [number, number][],
+      storeUuid: zone.storeUuid,
+    });
+    setEditingZoneId(zone.zoneId ?? null);
+    setEditingPlacemarkIndex(null);
+    setParsedPlacemarks([]);
+    setShowModal(true);
+  };
+
   const storeSuggestions = storeName.trim()
     ? stores.filter((s) => s.storeName.toLowerCase().includes(storeName.trim().toLowerCase()))
-    : stores.slice(0, 10);
+    : stores.slice(0, 8);
 
   return (
-    <div style={styles.container}>
-      <h2 style={{ color: "#FF6600" }}>Delivery Zones</h2>
-
-      {/* Store name input + Search / Upload Row */}
-      <div style={{ display: "flex", marginBottom: "16px", gap: "8px", alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1 }}>
-          <input
-            type="text"
-            placeholder="Type or pick Store Name"
-            value={storeName}
-            onChange={(e) => {
-              setStoreName(e.target.value);
-              // show suggestions again on change
-              setShowSuggestions(true);
-            }}
-            // show suggestions on focus, hide on blur (with slight delay to allow click)
-            onFocus={() => setShowSuggestions(true)}
-            onBlur={() => {
-              // small timeout to allow click on suggestion before hiding
-              setTimeout(() => setShowSuggestions(false), 150);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                // attempt resolution (exact then prefix) and hide suggestions
-                const candidate = stores.find((s) => s.storeName?.toLowerCase() === storeName.trim().toLowerCase())
-                  ?? stores.find((s) => s.storeName?.toLowerCase().startsWith(storeName.trim().toLowerCase()));
-                if (candidate) {
-                  setSelectedStoreUuid(candidate.uuid);
-                  setStoreName(candidate.storeName);
-                  alert(`Resolved store "${candidate.storeName}"`);
-                } else {
-                  setSelectedStoreUuid(null);
-                  alert("Store not found. Please select from suggestions or add the store in backend.");
-                }
-                setShowSuggestions(false);
-              }
-            }}
-            style={{ ...styles.input, width: "100%" }}
-            aria-label="Store Name"
-          />
-          {/* Suggestions dropdown */}
-          {storeSuggestions.length > 0 && storeName.trim() !== "" && showSuggestions && (
-            <div style={{ position: "absolute", top: "42px", left: 0, right: 0, background: "#fff", border: "1px solid #ddd", zIndex: 30, maxHeight: "200px", overflowY: "auto" }}>
-              {storeSuggestions.map((s, i) => (
-                <div
-                  key={i}
-                  onMouseDown={(ev) => {
-                    // onMouseDown instead of onClick to avoid race with input blur
-                    ev.preventDefault();
-                    setStoreName(s.storeName);
-                    setSelectedStoreUuid(s.uuid);
-                    setShowSuggestions(false);
-                  }}
-                  style={{ padding: "8px", cursor: "pointer", borderBottom: "1px solid #f1f1f1" }}
-                >
-                  {s.storeName}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={fetchZones} style={styles.button}>Fetch Zones</button>
-
-          {/* Upload KML */}
-          <label
-            style={{
-              marginLeft: "8px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "10px",
-              backgroundColor: "#FF6600",
-              border: "solid",
-              borderRadius: "8px",
-              padding: "10px 16px",
-              cursor: "pointer",
-              transition: "all 0.2s ease-in-out",
-            }}
-            onMouseOver={(e) => (e.currentTarget.style.borderColor = "#000000")}
-            onMouseOut={(e) => (e.currentTarget.style.borderColor = "#ffffff")}
-          >
-            <span style={{ color: "#000000", fontWeight: "500" }}>Choose File</span>
-            <input
-              type="file"
-              accept=".kml"
-              onChange={(e) =>
-                handleFileUpload(e.target.files ? e.target.files[0] : null)
-              }
-              style={{ display: "none" }}
-            />
-          </label>
-
-        </div>
+    <div style={{ display: "flex", gap: 24, padding: 20, alignItems: "flex-start", fontFamily: "'Inter', system-ui, Arial" }}>
+      <div style={{ flex: 1, minHeight: 520, borderRadius: 10, background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,0.06)", padding: 12 }}>
+        <MapPreviewGoogle zones={zones} height={520} />
       </div>
 
-      {/* Add button */}
-      <button onClick={openAddModal} style={{ ...styles.button, marginBottom: "16px" }}>Add Delivery Zone</button>
+      {/* Right: Panel */}
+      <aside style={{ width: 380 }}>
+        <div style={{ background: "#fff", padding: 18, borderRadius: 10, boxShadow: "0 1px 2px rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 20 }}>Delivery Zones</h3>
+              <div style={{ fontSize: 13, color: "#666" }}>Create and manage delivery areas</div>
+            </div>
 
-      {/* Parsed placemarks preview */}
-      {parsingError && <p style={{ color: "red" }}>{parsingError}</p>}
-      {parsedPlacemarks.length > 0 && (
-        <div style={{ marginBottom: "16px" }}>
-          <h3 style={{ marginBottom: "8px" }}>Imported Placemarks ({parsedPlacemarks.length})</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {parsedPlacemarks.map((pm, idx) => (
-              <div key={idx} style={{ border: "1px solid #ddd", padding: "12px", borderRadius: "6px", background: "#fff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <strong>{pm.parsedDescription?.zoneName ?? pm.name ?? `Placemark ${idx + 1}`}</strong>
-                    {/* <div style={{ fontSize: "13px", color: "#666" }}>{pm.parsedDescription?.notes ? (Array.isArray(pm.parsedDescription.notes) ? pm.parsedDescription.notes.join("; ") : pm.parsedDescription.notes) : pm.rawDescription}</div> */}
-                    <div style={{ marginTop: "8px", fontSize: "13px" }}>
-                      <div><strong>Base Fee:</strong> {pm.parsedDescription?.baseDeliveryFee ?? 0}</div>
-                      <div><strong>Per Mile Fee:</strong> {pm.parsedDescription?.perMileFee ?? 0}</div>
-                      <div><strong>Min Order:</strong> {pm.parsedDescription?.minOrderAmount ?? 0}</div>
-                      <div><strong>Est Prep:</strong> {pm.parsedDescription?.estimatedPreparationTime ?? 0} mins</div>
-                      <div><strong>Restricted:</strong> {pm.parsedDescription?.isRestricted ? "Yes" : "No"}</div>
-                      <div><strong>Coordinates:</strong> {pm.coordinates.length} points</div>
-                    </div>
+            {/* Add + Upload */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                onMouseEnter={() => setIsAddHover(true)}
+                onMouseLeave={() => setIsAddHover(false)}
+                onClick={() => {
+                  setParsedPlacemarks([]);
+                  setParsingError(null);
+                  setEditingPlacemarkIndex(null);
+                  setEditingZoneId(null);
+                  setForm({
+                    zoneName: "",
+                    baseDeliveryFee: 0,
+                    perMileFee: 0,
+                    minOrderAmount: 0,
+                    estimatedPreparationTime: 0,
+                    restricted: false,
+                    coordinates: [[0, 0]],
+                    storeUuid: selectedStoreUuid ?? "",
+                  });
+                  setShowModal(true);
+                }}
+                style={{
+                  background: isAddHover ? "#FF6600" : "#ffffff",
+                  color: isAddHover ? "#ffffff" : "#000000",
+                  border: "1px solid #e6eef7",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+                aria-label="Add Zone"
+              >
+                + Add Zone
+              </button>
+
+              <label style={{ display: "inline-flex", alignItems: "center", padding: "6px 8px", background: "#f3f6f9", borderRadius: 8, cursor: "pointer", border: "1px dashed #ddd" }}>
+                <input
+                  type="file"
+                  accept=".kml"
+                  onChange={(e) => handleFileUpload(e.target.files ? e.target.files[0] : null)}
+                  style={{ display: "none" }}
+                />
+                Upload
+              </label>
+            </div>
+          </div>
+
+          {/* store input */}
+          <div style={{ marginTop: 12 }}>
+            <input
+              type="text"
+              placeholder="Type or pick Store"
+              value={storeName}
+              onChange={(e) => setStoreName(e.target.value)}
+              style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #e6eef7" }}
+              aria-label="Store name"
+            />
+            {storeSuggestions.length > 0 && storeName.trim() !== "" && (
+              <div style={{ marginTop: 6, background: "#fff", border: "1px solid #eee", borderRadius: 8, maxHeight: 160, overflowY: "auto" }}>
+                {storeSuggestions.map((s, i) => (
+                  <div
+                    key={i}
+                    onMouseDown={(ev) => {
+                      ev.preventDefault();
+                      setStoreName(s.storeName);
+                      setSelectedStoreUuid(s.uuid);
+                    }}
+                    style={{ padding: 10, cursor: "pointer", borderBottom: "1px solid #f6f6f6" }}
+                  >
+                    {s.storeName}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button
+                onClick={fetchZones}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#e65c00")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#FF6600")}
+                style={{ flex: 1, padding: 10, borderRadius: 8, background: "#FF6600", color: "#fff", border: "none" }}
+              >
+                Load Zones
+              </button>
+            </div>
+          </div>
+
+          {/* zones selector + card */}
+          <div style={{ marginTop: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ fontSize: 15 }}>Available Zones</strong>
+              <span style={{ fontSize: 13, color: "#999" }}>{zones.length}</span>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <select
+                onChange={(e) => {
+                  const zid = e.target.value;
+                  const z = zones.find((zz) => String(zz.zoneId) === zid);
+                  if (z) {
+                    setZones((prev) => [z, ...prev.filter((p) => p.zoneId !== z.zoneId)]);
+                  }
+                }}
+                style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #eee" }}
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Select zone...
+                </option>
+                {zones.map((z) => (
+                  <option key={z.zoneId} value={z.zoneId}>
+                    {z.zoneName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {zones.length > 0 && (
+              <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: "#fff", border: "1px solid #f0f3f6" }}>
+                {(() => {
+                  const zone = zones[0];
+                  const examples = (() => {
+                    const distances = [1, 3, 5];
+                    return distances.map((d) => {
+                      const cost = Number(zone.baseDeliveryFee || 0) + Number(zone.perMileFee || 0) * d;
+                      return { miles: d, cost: Number(cost.toFixed(2)) };
+                    });
+                  })();
+                  return (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 16, fontWeight: 600 }}>{zone.zoneName}</div>
+                          <div style={{ fontSize: 12, color: "#666" }}>{zone.restricted ? "Restricted" : "Open"}</div>
+                        </div>
+                        <div>
+                          <button
+                            onClick={() => openEditForZone(zone)}
+                            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e6eef7", background: "#fff", cursor: "pointer" }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(zone)}
+                            style={{ marginLeft: 8, padding: "6px 10px", borderRadius: 8, border: "none", background: "#ffdddd", cursor: "pointer" }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+                        <div style={{ padding: 12, borderRadius: 8, background: "#f8fafb", textAlign: "center" }}>
+                          <div style={{ fontSize: 13, color: "#777" }}>Base Fee</div>
+                          <div style={{ fontSize: 18, fontWeight: 700 }}>${zone.baseDeliveryFee.toFixed(2)}</div>
+                        </div>
+                        <div style={{ padding: 12, borderRadius: 8, background: "#f8fafb", textAlign: "center" }}>
+                          <div style={{ fontSize: 13, color: "#777" }}>Per Mile</div>
+                          <div style={{ fontSize: 18, fontWeight: 700 }}>${zone.perMileFee.toFixed(2)}</div>
+                        </div>
+                        <div style={{ padding: 12, borderRadius: 8, background: "#f8fafb", textAlign: "center" }}>
+                          <div style={{ fontSize: 13, color: "#777" }}>Min Order</div>
+                          <div style={{ fontSize: 18, fontWeight: 700 }}>${zone.minOrderAmount.toFixed(2)}</div>
+                        </div>
+                        <div style={{ padding: 12, borderRadius: 8, background: "#f8fafb", textAlign: "center" }}>
+                          <div style={{ fontSize: 13, color: "#777" }}>Prep Time</div>
+                          <div style={{ fontSize: 18, fontWeight: 700 }}>{zone.estimatedPreparationTime || "min"}</div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontWeight: 600 }}>Delivery Cost</div>
+                        <ul style={{ marginTop: 8 }}>
+                          {examples.map((ex) => (
+                            <li key={ex.miles} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f3f6f9" }}>
+                              <div>{ex.miles} mile delivery:</div>
+                              <div style={{ fontWeight: 700 }}>${ex.cost.toFixed(2)}</div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {zones.length === 0 && !loading && <div style={{ marginTop: 10, color: "#777" }}>No zones yet. Upload a KML or create a new zone.</div>}
+            {loading && <div style={{ marginTop: 12 }}>Loading...</div>}
+            {error && <div style={{ marginTop: 12, color: "red" }}>{error}</div>}
+          </div>
+
+          {parsingError && <div style={{ marginTop: 12, color: "red" }}>{parsingError}</div>}
+        </div>
+      </aside>
+
+      {/* Modal */}
+      {showModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 60,
+          }}
+        >
+          <div style={{ width: 680, maxHeight: "85vh", overflowY: "auto", background: "#fff", borderRadius: 10, padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0 }}>{editingPlacemarkIndex != null ? "Review Placemark" : parsedPlacemarks.length ? "Imported Placemarks" : editingZoneId != null ? "Edit Zone" : "Add Zone"}</h3>
+              <button
+                onClick={() => {
+                  setShowModal(false);
+                  setEditingPlacemarkIndex(null);
+                  setEditingZoneId(null);
+                }}
+                style={{ border: "none", background: "transparent", cursor: "pointer" }}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Compact imported list */}
+            {parsedPlacemarks.length > 0 && editingPlacemarkIndex == null && (
+              <div style={{ marginTop: 12, position: "relative" }}>
+                {/* card that holds the list; add bottom padding so absolute buttons don't overlap content */}
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 10,
+                    background: "#fff",
+                    border: "1px solid #f3f6f9",
+                    boxShadow: "0 4px 10px rgba(12,18,28,0.03)",
+                    maxHeight: 420,
+                    overflowY: "auto",
+                    paddingBottom: 64, // leave space for bottom-right buttons
+                  }}
+                >
+                  <div style={{ marginBottom: 12, color: "#222", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong style={{ fontSize: 15 }}>Imported Placemarks ({parsedPlacemarks.length})</strong>
+                    {/* small helper text */}
+                    <span style={{ fontSize: 12, color: "#888" }}>Review or import</span>
                   </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <button style={styles.modalButton} onClick={() => reviewPlacemark(pm)}>Review & Edit</button>
-                    <button
-                      style={{ ...styles.modalButton, backgroundColor: "#38a169" }}
-                      onClick={() => createFromPlacemark(pm, idx)}
-                      disabled={uploadingIndex === idx}
-                    >
-                      {uploadingIndex === idx ? "Creating..." : "Create Now"}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {parsedPlacemarks.map((pm, idx) => {
+                      const pd = pm.parsedDescription || {};
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: 12,
+                            borderRadius: 10,
+                            background: "#fbfdff",
+                            border: "1px solid #eef6fb",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: 12,
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: "#0b2540" }}>{pd.zoneName ?? pm.name ?? `Placemark ${idx + 1}`}</div>
+
+                            {/* CLEANED KEY/VALUE CHIPS */}
+                            <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              {/* chip factory */}
+                              {[
+                                { k: "baseDeliveryFee", v: pd.baseDeliveryFee },
+                                { k: "perMileFee", v: pd.perMileFee },
+                                { k: "minOrderAmount", v: pd.minOrderAmount },
+                                { k: "isRestricted", v: pd.isRestricted ?? false },
+                              ].map((item) => (
+                                <div
+                                  key={item.k}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    padding: "6px 10px",
+                                    background: "#ffffff",
+                                    border: "1px solid #eef3f7",
+                                    borderRadius: 999,
+                                    boxShadow: "0 1px 0 rgba(16,24,40,0.02)",
+                                    fontSize: 13,
+                                    color: "#334155",
+                                    minHeight: 30,
+                                  }}
+                                >
+                                  <strong style={{ fontWeight: 600, fontSize: 12, color: "#0b2540" }}>{labelForKey(item.k)}:</strong>
+                                  <span style={{ fontWeight: 600 }}>{formatValueForKey(item.k, item.v ?? "-")}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* action buttons for each placemark */}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <button
+                              onClick={() => reviewPlacemark(pm, idx)}
+                              style={{
+                                padding: "6px 10px",
+                                borderRadius: 8,
+                                background: "#eef6ff",
+                                border: "1px solid #e6f0ff",
+                                cursor: "pointer",
+                                fontWeight: 600,
+                              }}
+                            >
+                              Review
+                            </button>
+
+                            <button
+                              onClick={() => createFromPlacemark(pm, idx)}
+                              disabled={uploadingIndex === idx}
+                              style={{
+                                padding: "6px 10px",
+                                borderRadius: 8,
+                                background: "#e6ffef",
+                                border: "1px solid #dff5e8",
+                                cursor: uploadingIndex === idx ? "not-allowed" : "pointer",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {uploadingIndex === idx ? "Creating..." : "Create"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 8,
+                    bottom: 4,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    onClick={() => setParsedPlacemarks([])}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background: "#fff",
+                      border: "1px solid #e6eef7",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    onClick={createAllPlacemarks}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background: "#FF6600",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      boxShadow: "0 6px 18px rgba(255,102,0,0.14)",
+                    }}
+                  >
+                    Create All
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(editingPlacemarkIndex != null || parsedPlacemarks.length === 0 || editingZoneId != null) && (
+              <>
+                {editingPlacemarkIndex != null && parsedPlacemarks[editingPlacemarkIndex] && (
+                  <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: "#fbfbff", border: "1px solid #eef2ff" }}>
+                    <div style={{ fontWeight: 700 }}>{parsedPlacemarks[editingPlacemarkIndex].parsedDescription?.zoneName ?? parsedPlacemarks[editingPlacemarkIndex].name}</div>
+                    <div style={{ fontSize: 13, color: "#666" }}>{(parsedPlacemarks[editingPlacemarkIndex].parsedDescription?.notes ?? parsedPlacemarks[editingPlacemarkIndex].rawDescription)?.toString().slice(0, 180)}</div>
+                  </div>
+                )}
+
+                <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <label style={{ display: "flex", flexDirection: "column" }}>
+                    Zone name
+                    <input value={form.zoneName} onChange={(e) => setForm({ ...form, zoneName: e.target.value })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column" }}>
+                    Base fee
+                    <input type="number" value={form.baseDeliveryFee} onChange={(e) => setForm({ ...form, baseDeliveryFee: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column" }}>
+                    Per mile
+                    <input type="number" value={form.perMileFee} onChange={(e) => setForm({ ...form, perMileFee: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column" }}>
+                    Min order
+                    <input type="number" value={form.minOrderAmount} onChange={(e) => setForm({ ...form, minOrderAmount: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column" }}>
+                    Estimated prep time (mins)
+                    <input type="number" value={form.estimatedPreparationTime} onChange={(e) => setForm({ ...form, estimatedPreparationTime: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
+                  </label>
+
+                  <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input type="checkbox" checked={form.restricted} onChange={(e) => setForm({ ...form, restricted: e.target.checked })} />
+                    <span>Restricted</span>
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column" }}>
+                    Store UUID (auto)
+                    <input value={form.storeUuid || selectedStoreUuid || ""} readOnly style={{ padding: 10, borderRadius: 6, border: "1px solid #eee", background: "#fafafa" }} />
+                  </label>
+                </div>
+
+                {/* coordinates */}
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontWeight: 600 }}>Coordinates</div>
+                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {form.coordinates.map((coord, idx) => (
+                      <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="number"
+                          value={coord[0]}
+                          onChange={(e) => {
+                            const copy = [...form.coordinates];
+                            copy[idx] = [Number(e.target.value), copy[idx][1]];
+                            setForm({ ...form, coordinates: copy });
+                          }}
+                          style={{ padding: 8, width: 140, borderRadius: 6, border: "1px solid #eee" }}
+                        />
+                        <input
+                          type="number"
+                          value={coord[1]}
+                          onChange={(e) => {
+                            const copy = [...form.coordinates];
+                            copy[idx] = [copy[idx][0], Number(e.target.value)];
+                            setForm({ ...form, coordinates: copy });
+                          }}
+                          style={{ padding: 8, width: 140, borderRadius: 6, border: "1px solid #eee" }}
+                        />
+                        <button
+                          onClick={() => {
+                            setForm({ ...form, coordinates: form.coordinates.filter((_, i) => i !== idx) });
+                          }}
+                          style={{ padding: 8, borderRadius: 6, background: "#ffefef", border: "none", cursor: "pointer" }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={() => setForm({ ...form, coordinates: [...form.coordinates, [0, 0]] })} style={{ padding: 10, borderRadius: 8, background: "#eef6ff", border: "none", cursor: "pointer" }}>
+                      Add coordinate
                     </button>
                   </div>
                 </div>
-              </div>
-            ))}
-            <div style={{ marginTop: "8px" }}>
-              <button style={{ ...styles.button, marginRight: "8px" }} onClick={createAllPlacemarks}>Create All</button>
-              <button style={{ ...styles.modalButton, backgroundColor: "#aaa" }} onClick={() => { setParsedPlacemarks([]); }}>Clear List</button>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Zones Table */}
-      {loading && <p>Loading...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      {zones.length > 0 && (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Zone Name</th>
-              <th style={styles.th}>Base Fee</th>
-              <th style={styles.th}>Per Mile Fee</th>
-              <th style={styles.th}>Min Order</th>
-              <th style={styles.th}>Restricted</th>
-              <th style={styles.th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {zones.map((zone) => (
-              <tr key={zone.zoneId}>
-                <td style={styles.td}>{zone.zoneName}</td>
-                <td style={styles.td}>{zone.baseDeliveryFee}</td>
-                <td style={styles.td}>{zone.perMileFee}</td>
-                <td style={styles.td}>{zone.minOrderAmount}</td>
-                <td style={styles.td}>{zone.isRestricted ? "Yes" : "No"}</td>
-                <td style={styles.td}>
-                  <button onClick={() => openEditModal(zone)} style={{ ...styles.modalButton, marginRight: "8px" }}>Edit</button>
-                  <button onClick={() => handleDelete(zone)} style={styles.removeCoordBtn}>Delete</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {!loading && zones.length === 0 && <p>No zones found.</p>}
-
-      {/* --- Modal --- */}
-      {showModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <h3 style={{ color: "#FF6600" }}>{editZone ? "Edit Zone" : "Add Delivery Zone"}</h3>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "12px" }}>
-              <label style={styles.label}>
-                Zone Name:
-                <input value={form.zoneName} onChange={(e) => setForm({ ...form, zoneName: e.target.value })} style={styles.modalInput} />
-              </label>
-
-              <label style={styles.label}>
-                Base Fee:
-                <input type="number" value={form.baseDeliveryFee} onChange={(e) => setForm({ ...form, baseDeliveryFee: Number(e.target.value) })} style={styles.modalInput} />
-              </label>
-
-              <label style={styles.label}>
-                Per Mile Fee:
-                <input type="number" value={form.perMileFee} onChange={(e) => setForm({ ...form, perMileFee: Number(e.target.value) })} style={styles.modalInput} />
-              </label>
-
-              <label style={styles.label}>
-                Min Order:
-                <input type="number" value={form.minOrderAmount} onChange={(e) => setForm({ ...form, minOrderAmount: Number(e.target.value) })} style={styles.modalInput} />
-              </label>
-
-              <label style={styles.label}>
-                Estimated Prep Time:
-                <input type="number" value={form.estimatedPreparationTime} onChange={(e) => setForm({ ...form, estimatedPreparationTime: Number(e.target.value) })} style={styles.modalInput} />
-              </label>
-
-              <label style={{ ...styles.label, flexDirection: "row", alignItems: "center", gap: "8px" }}>
-                Restricted:
-                <input type="checkbox" checked={form.isRestricted} onChange={(e) => setForm({ ...form, isRestricted: e.target.checked })} />
-              </label>
-
-              <label style={styles.label}>
-                Store UUID:
-                <input value={form.storeUuid || selectedStoreUuid || ""} readOnly style={{ ...styles.modalInput, backgroundColor: "#eee", cursor: "not-allowed" }} />
-              </label>
-            </div>
-
-            {/* Coordinates */}
-            <div style={{ marginTop: "16px" }}>
-              <h4>Coordinates</h4>
-              {form.coordinates.map((coord, idx) => (
-                <div key={idx} style={styles.coordinateRow}>
-                  <label style={{ display: "flex", flexDirection: "column" }}>
-                    Lat:
-                    <input type="number" value={coord[0]} onChange={(e) => handleCoordinateChange(idx, 0, Number(e.target.value))} style={styles.coordinateInput} />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column" }}>
-                    Lng:
-                    <input type="number" value={coord[1]} onChange={(e) => handleCoordinateChange(idx, 1, Number(e.target.value))} style={styles.coordinateInput} />
-                  </label>
-                  <button onClick={() => removeCoordinate(idx)} style={styles.removeCoordBtn}>Remove</button>
+                <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  {editingPlacemarkIndex != null && (
+                    <button
+                      onClick={() => {
+                        setEditingPlacemarkIndex(null); /* keep parsed list */
+                      }}
+                      style={{ padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #eee" }}
+                    >
+                      Back
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setShowModal(false);
+                      setEditingPlacemarkIndex(null);
+                      setEditingZoneId(null);
+                    }}
+                    style={{ padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #eee" }}
+                  >
+                    Cancel
+                  </button>
+                  <button onClick={handleSubmit} style={{ padding: "8px 12px", borderRadius: 8, background: "#FF6600", color: "#fff", border: "none" }}>
+                    {editingZoneId != null ? "Update" : "Save"}
+                  </button>
                 </div>
-              ))}
-              <button onClick={addCoordinate} style={{ ...styles.modalButton, marginTop: "8px" }}>Add Coordinate</button>
-            </div>
-
-            <div style={{ marginTop: "16px", textAlign: "right" }}>
-              <button onClick={() => setShowModal(false)} style={{ marginRight: "8px", ...styles.modalButton, backgroundColor: "#aaa" }}>Cancel</button>
-              <button onClick={handleSubmit} style={styles.modalButton}>{editZone ? "Update" : "Add"}</button>
-            </div>
+              </>
+            )}
           </div>
         </div>
       )}
+
+      <AlertDialog alert={customAlert} onClose={closeAlert} />
     </div>
   );
 }
