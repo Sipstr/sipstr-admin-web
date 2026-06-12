@@ -105,6 +105,32 @@ jobs:
             -backend-config="encrypt=true"
         working-directory: infra
 
+      - name: Import Existing CloudFront OAC (if present)
+        run: |
+          OAC_NAME="s3-oac-${{ needs.determine-environment.outputs.subdomain }}.${{ needs.determine-environment.outputs.domain_name }}"
+          echo "Checking CloudFront OAC: ${OAC_NAME}"
+
+          if terraform state show aws_cloudfront_origin_access_control.oac >/dev/null 2>&1; then
+            echo "OAC already present in Terraform state"
+            exit 0
+          fi
+
+          OAC_ID=$(aws cloudfront list-origin-access-controls \
+            --query "OriginAccessControlList.Items[?Name=='${OAC_NAME}'].Id | [0]" \
+            --output text)
+
+          if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
+            echo "Importing existing OAC ID: ${OAC_ID}"
+            terraform import aws_cloudfront_origin_access_control.oac "$OAC_ID"
+          else
+            echo "No existing OAC found; Terraform will create a new one"
+          fi
+        working-directory: infra
+        env:
+          TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
+          TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
+
       - name: Terraform Plan
         id: plan
         run: terraform plan -input=false -out=tfplan
@@ -145,23 +171,28 @@ jobs:
       
       - name: Export Next.js Environment Variables
         run: |
-          echo "NEXT_PUBLIC_BASE_URL=https://api.dev.sipstr.com" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_ROLE=SUPER_ADMIN" >> $GITHUB_ENV
+          if [ -z "${{ vars.NEXT_PUBLIC_BASE_URL }}" ]; then
+            echo "❌ Missing NEXT_PUBLIC_BASE_URL in GitHub Environment variables"
+            exit 1
+          fi
 
-          echo "NEXT_PUBLIC_FEATURE_DASHBOARD=true" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_USERS=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_ROLES=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_BRANDS=true" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_PRODUCTS=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_STORES=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_ORDERS=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_COUPON=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_TOP_PICKS=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_ZONES=true" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_REPORTS=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_SUBSTITUTE=true" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_AUDIT=false" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FEATURE_REASONS=false" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_BASE_URL }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_ROLE=${{ vars.NEXT_PUBLIC_ROLE || 'SUPER_ADMIN' }}" >> $GITHUB_ENV
+
+          echo "NEXT_PUBLIC_FEATURE_DASHBOARD=${{ vars.NEXT_PUBLIC_FEATURE_DASHBOARD || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_USERS=${{ vars.NEXT_PUBLIC_FEATURE_USERS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ROLES=${{ vars.NEXT_PUBLIC_FEATURE_ROLES || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_BRANDS=${{ vars.NEXT_PUBLIC_FEATURE_BRANDS || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_PRODUCTS=${{ vars.NEXT_PUBLIC_FEATURE_PRODUCTS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_STORES=${{ vars.NEXT_PUBLIC_FEATURE_STORES || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ORDERS=${{ vars.NEXT_PUBLIC_FEATURE_ORDERS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_COUPON=${{ vars.NEXT_PUBLIC_FEATURE_COUPON || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_TOP_PICKS=${{ vars.NEXT_PUBLIC_FEATURE_TOP_PICKS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ZONES=${{ vars.NEXT_PUBLIC_FEATURE_ZONES || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_REPORTS=${{ vars.NEXT_PUBLIC_FEATURE_REPORTS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_SUBSTITUTE=${{ vars.NEXT_PUBLIC_FEATURE_SUBSTITUTE || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_AUDIT=${{ vars.NEXT_PUBLIC_FEATURE_AUDIT || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_REASONS=${{ vars.NEXT_PUBLIC_FEATURE_REASONS || 'false' }}" >> $GITHUB_ENV
 
           echo "NEXT_PUBLIC_GOOGLE_MAPS_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_KEY }}" >> $GITHUB_ENV
 
