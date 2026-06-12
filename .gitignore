@@ -112,3 +112,4 @@ vite.config.ts.timestamp-*
 .dynamodb/
 
 .idea
+.env.local

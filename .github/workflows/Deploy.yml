@@ -11,7 +11,7 @@ on:
         options:
           - main
           - release/integration
-          - feature/dev
+          - develop
       rollback_enabled:
         description: "⚠️ Destroy infrastructure if deployment fails?"
         required: false
@@ -21,7 +21,7 @@ on:
     branches:
       - main
       - release/integration
-      - "*"
+      - develop
 
 permissions:
   id-token: write
@@ -31,28 +31,44 @@ jobs:
   determine-environment:
     runs-on: ubuntu-latest
     outputs:
+      branch_name: ${{ steps.set-env.outputs.branch_name }}
       environment: ${{ steps.set-env.outputs.environment }}
       subdomain: ${{ steps.set-env.outputs.subdomain }}
+      domain_name: ${{ steps.set-env.outputs.domain_name }}
 
     steps:
       - name: Set environment and subdomain
         id: set-env
         run: |
-          echo "🔍 BRANCH: ${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BRANCH_NAME="${{ github.event.inputs.branch }}"
+          else
+            BRANCH_NAME="${GITHUB_REF_NAME}"
+          fi
 
-          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+          echo "🔍 BRANCH: ${BRANCH_NAME}"
+          echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+
+          if [[ "${BRANCH_NAME}" == "main" ]]; then
             echo "environment=production" >> $GITHUB_OUTPUT
             echo "subdomain=admin" >> $GITHUB_OUTPUT
-          elif [[ "${GITHUB_REF_NAME}" == "release/integration" ]]; then
+            echo "domain_name=sipstr.com" >> $GITHUB_OUTPUT
+          elif [[ "${BRANCH_NAME}" == "release/integration" ]]; then
             echo "environment=sandbox" >> $GITHUB_OUTPUT
             echo "subdomain=admin.sandbox" >> $GITHUB_OUTPUT
-          else
+            echo "domain_name=sipstr.com" >> $GITHUB_OUTPUT
+          elif [[ "${BRANCH_NAME}" == "develop" ]]; then
             echo "environment=dev" >> $GITHUB_OUTPUT
             echo "subdomain=admin.dev" >> $GITHUB_OUTPUT
+            echo "domain_name=sipstr.com" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Unsupported branch for deployment: ${BRANCH_NAME}"
+            exit 1
           fi
 
           echo "Selected Environment: $(grep environment $GITHUB_OUTPUT | cut -d= -f2)"
           echo "Selected Subdomain: $(grep subdomain $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Selected Domain: $(grep domain_name $GITHUB_OUTPUT | cut -d= -f2)"
 
   terraform:
     runs-on: ubuntu-latest
@@ -62,6 +78,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.determine-environment.outputs.branch_name }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -89,21 +107,23 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -input=false -out=tfplan || true
+        run: terraform plan -input=false -out=tfplan
         working-directory: infra
         env:
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
 
       - name: Terraform Apply
         id: apply
-        run: terraform apply -input=false -auto-approve tfplan || true
+        run: terraform apply -input=false -auto-approve tfplan
         working-directory: infra
         env:
           TF_LOG: INFO
           TF_LOG_PATH: terraform-debug.log
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
 
       - name: Output ACM Records
         if: success()
@@ -161,11 +181,20 @@ jobs:
 
       - name: Invalidate CloudFront
         run: |
-          DIST=$(terraform -chdir=infra output -raw cloudfront_distribution_id || true)
-          if [ -n "$DIST" ]; then
+          DIST=""
+          if terraform -chdir=infra output -raw cloudfront_distribution_id >/tmp/cloudfront_dist_id 2>/dev/null; then
+            DIST=$(tr -d '[:space:]' </tmp/cloudfront_dist_id)
+          fi
+
+          if [ -z "$DIST" ] || [ "$DIST" = "null" ]; then
+            echo "⚠️ No CloudFront distribution output in Terraform state; skipping invalidation"
+            exit 0
+          fi
+
+          if aws cloudfront get-distribution --id "$DIST" >/dev/null 2>&1; then
             aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
           else
-            echo "⚠️ No CloudFront distribution found"
+            echo "⚠️ CloudFront distribution '$DIST' not found; skipping invalidation"
           fi
 
       - name: Rollback on Failure
@@ -175,6 +204,7 @@ jobs:
         env:
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
 
   # ============================
   # 🔥 DEBUG JOB (ALWAYS RUNS)

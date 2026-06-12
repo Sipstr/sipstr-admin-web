@@ -5,6 +5,7 @@ locals {
 
   tags = {
     Project = var.project_name
+    Env     = var.env
     Stack   = "frontend"
   }
 }
