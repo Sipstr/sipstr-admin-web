@@ -168,7 +168,7 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
-      
+
       - name: Export Next.js Environment Variables
         run: |
           if [ -z "${{ vars.NEXT_PUBLIC_BASE_URL }}" ]; then
@@ -235,6 +235,204 @@ jobs:
         env:
           TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
           TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
+
+  # ============================
+  # 🔥 DEBUG JOB (ALWAYS RUNS)
+  # ============================
+  debug-info:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: AWS Auth
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Terraform Debug
+      - name: Terraform Show
+        run: terraform show -json || true
+        working-directory: infra
+
+      - name: Terraform State List
+        run: terraform state list || true
+        working-directory: infra
+
+      - name: Print Terraform Files
+        run: find infra -type f -print -exec cat {} \;
+
+      # AWS Debug
+      - name: CloudFront Distributions
+        run: aws cloudfront list-distributions || true
+
+      - name: Describe Each CloudFront
+        run: |
+          IDS=$(aws cloudfront list-distributions --query "DistributionList.Items[].Id" --output text)
+          for ID in $IDS; do
+            echo "--------------------"
+            aws cloudfront get-distribution --id $ID || true
+          done
+
+      - name: ACM Certificates (us-east-1)
+        run: aws acm list-certificates --region us-east-1 || true
+
+      - name: ACM Describe Details
+        run: |
+          CERTS=$(aws acm list-certificates --region us-east-1 --query "CertificateSummaryList[].CertificateArn" --output text)
+          for C in $CERTS; do
+            echo "----------------------"
+            aws acm describe-certificate --certificate-arn $C --region us-east-1 || true
+          done
+
+      - name: Route53 Hosted Zones
+        run: aws route53 list-hosted-zones || true
+
+      - name: Route53 Records
+        run: |
+          ZONES=$(aws route53 list-hosted-zones --query "HostedZones[].Id" --output text)
+          for Z in $ZONES; do
+            aws route53 list-resource-record-sets --hosted-zone-id $Z || true
+          done
+
+      - name: S3 Buckets
+        run: aws s3 ls || true
+
+      - name: S3 Bucket Details
+        run: |
+          for B in $(aws s3 ls --output text | awk '{print $3}'); do
+            echo "Bucket: $B"
+            aws s3api get-bucket-policy --bucket $B || true
+            aws s3api get-bucket-location --bucket $B || true
+          done
+
+      - name: Upload Terraform Debug Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-debug-log
+          path: infra/terraform-debug.log
+        continue-on-error: true
+          - develop
+        description: "⚠️ Destroy infrastructure if deployment fails?"
+      - develop
+      branch_name: ${{ steps.set-env.outputs.branch_name }}
+      domain_name: ${{ steps.set-env.outputs.domain_name }}
+
+      - name: Set environment and subdomain
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BRANCH_NAME="${{ github.event.inputs.branch }}"
+          else
+            BRANCH_NAME="${GITHUB_REF_NAME}"
+          fi
+          echo "🔍 BRANCH: ${BRANCH_NAME}"
+          echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+
+          if [[ "${BRANCH_NAME}" == "main" ]]; then
+            echo "domain_name=sipstr.com" >> $GITHUB_OUTPUT
+          elif [[ "${BRANCH_NAME}" == "release/integration" ]]; then
+            echo "domain_name=sipstr.com" >> $GITHUB_OUTPUT
+          elif [[ "${BRANCH_NAME}" == "develop" ]]; then
+            echo "domain_name=sipstr.com" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Unsupported branch for deployment: ${BRANCH_NAME}"
+            exit 1
+          echo "Selected Environment: $(grep environment $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Selected Subdomain: $(grep subdomain $GITHUB_OUTPUT | cut -d= -f2)"
+          echo "Selected Domain: $(grep domain_name $GITHUB_OUTPUT | cut -d= -f2)"
+
+      - name: Checkout
+        with:
+          ref: ${{ needs.determine-environment.outputs.branch_name }}
+      - name: Configure AWS Credentials
+          export TF_LOG=DEBUG
+          export TF_LOG_PATH=terraform-debug.log
+      - name: Import Existing CloudFront OAC (if present)
+        run: |
+          OAC_NAME="s3-oac-${{ needs.determine-environment.outputs.subdomain }}.${{ needs.determine-environment.outputs.domain_name }}"
+          echo "Checking CloudFront OAC: ${OAC_NAME}"
+
+          if terraform state show aws_cloudfront_origin_access_control.oac >/dev/null 2>&1; then
+            echo "OAC already present in Terraform state"
+            exit 0
+          fi
+
+          OAC_ID=$(aws cloudfront list-origin-access-controls \
+            --query "OriginAccessControlList.Items[?Name=='${OAC_NAME}'].Id | [0]" \
+            --output text)
+
+          if [ -n "$OAC_ID" ] && [ "$OAC_ID" != "None" ]; then
+            echo "Importing existing OAC ID: ${OAC_ID}"
+            terraform import aws_cloudfront_origin_access_control.oac "$OAC_ID"
+          else
+            echo "No existing OAC found; Terraform will create a new one"
+          fi
+        working-directory: infra
+        env:
+          TF_VAR_env: ${{ needs.determine-environment.outputs.environment }}
+          TF_VAR_subdomain: ${{ needs.determine-environment.outputs.subdomain }}
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
+
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
+          TF_LOG_PATH: terraform-debug.log
+          TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
+      - name: Output ACM Records
+        if: success()
+          echo "👉 DNS Records needed for ACM:"
+      # Build Frontend
+
+      - name: Export Next.js Environment Variables
+        run: |
+          if [ -z "${{ vars.NEXT_PUBLIC_BASE_URL }}" ]; then
+            echo "❌ Missing NEXT_PUBLIC_BASE_URL in GitHub Environment variables"
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_BASE_URL=${{ vars.NEXT_PUBLIC_BASE_URL }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_ROLE=${{ vars.NEXT_PUBLIC_ROLE || 'SUPER_ADMIN' }}" >> $GITHUB_ENV
+
+          echo "NEXT_PUBLIC_FEATURE_DASHBOARD=${{ vars.NEXT_PUBLIC_FEATURE_DASHBOARD || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_USERS=${{ vars.NEXT_PUBLIC_FEATURE_USERS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ROLES=${{ vars.NEXT_PUBLIC_FEATURE_ROLES || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_BRANDS=${{ vars.NEXT_PUBLIC_FEATURE_BRANDS || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_PRODUCTS=${{ vars.NEXT_PUBLIC_FEATURE_PRODUCTS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_STORES=${{ vars.NEXT_PUBLIC_FEATURE_STORES || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ORDERS=${{ vars.NEXT_PUBLIC_FEATURE_ORDERS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_COUPON=${{ vars.NEXT_PUBLIC_FEATURE_COUPON || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_TOP_PICKS=${{ vars.NEXT_PUBLIC_FEATURE_TOP_PICKS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_ZONES=${{ vars.NEXT_PUBLIC_FEATURE_ZONES || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_REPORTS=${{ vars.NEXT_PUBLIC_FEATURE_REPORTS || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_SUBSTITUTE=${{ vars.NEXT_PUBLIC_FEATURE_SUBSTITUTE || 'true' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_AUDIT=${{ vars.NEXT_PUBLIC_FEATURE_AUDIT || 'false' }}" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_FEATURE_REASONS=${{ vars.NEXT_PUBLIC_FEATURE_REASONS || 'false' }}" >> $GITHUB_ENV
+
+          echo "NEXT_PUBLIC_GOOGLE_MAPS_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_KEY }}" >> $GITHUB_ENV
+
+
+          if [ -d "dist" ]; then BUILD_DIR="dist";
+          elif [ -d "build" ]; then BUILD_DIR="build";
+          elif [ -d "out" ]; then BUILD_DIR="out";
+          else echo "❌ No build dir found"; exit 1; fi
+      - name: Invalidate CloudFront
+          DIST=""
+          if terraform -chdir=infra output -raw cloudfront_distribution_id >/tmp/cloudfront_dist_id 2>/dev/null; then
+            DIST=$(tr -d '[:space:]' </tmp/cloudfront_dist_id)
+          fi
+
+          if [ -z "$DIST" ] || [ "$DIST" = "null" ]; then
+            echo "⚠️ No CloudFront distribution output in Terraform state; skipping invalidation"
+            exit 0
+          fi
+
+          if aws cloudfront get-distribution --id "$DIST" >/dev/null 2>&1; then
+            aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
+            echo "⚠️ CloudFront distribution '$DIST' not found; skipping invalidation"
+      - name: Rollback on Failure
+        run: terraform destroy -auto-approve
           TF_VAR_domain_name: ${{ needs.determine-environment.outputs.domain_name }}
 
   # ============================
