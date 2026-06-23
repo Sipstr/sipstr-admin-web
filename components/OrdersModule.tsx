@@ -4,6 +4,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiService } from "@/services/apiService";
 import type { RecentOrder, Order } from "@/services/types";
+import { PaginationControls } from "./PaginationControls";
+import { DataTable, ColumnDef, DataTableAction } from "./DataTable";
 
 /* -------------------- Helpers -------------------- */
 const fmt = (n?: number) => (n ?? 0).toFixed(2);
@@ -38,12 +40,12 @@ const InfoModal = ({ open, title, message, onClose }: {
 }) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white p-5 rounded-xl shadow-2xl w-[520px] max-w-full">
+    <div className="modal-overlay">
+      <div className="modal-panel p-5 w-[520px] max-w-full">
         {title && <h3 className="text-lg font-bold mb-2">{title}</h3>}
         <p className="text-sm text-gray-700 mb-4">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700">OK</button>
+        <div className="modal-footer">
+          <button onClick={onClose} className="modal-btn-primary">OK</button>
         </div>
       </div>
     </div>
@@ -55,13 +57,13 @@ const ConfirmModal = ({ open, title, message, onCancel, onConfirm }: {
 }) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white p-5 rounded-xl shadow-2xl w-[520px] max-w-full">
+    <div className="modal-overlay">
+      <div className="modal-panel p-5 w-[520px] max-w-full">
         {title && <h3 className="text-lg font-bold mb-2">{title}</h3>}
         <p className="text-sm text-gray-700 mb-4">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700">Confirm</button>
+        <div className="modal-footer">
+          <button onClick={onCancel} className="modal-btn-secondary">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors">Confirm</button>
         </div>
       </div>
     </div>
@@ -135,56 +137,72 @@ const OrderDetailsDialog = ({ order }: { order: Order }) => {
   );
 };
 
-/* -------------------- OrderPreviewList (unchanged logic, keys adjusted) -------------------- */
+/* -------------------- OrderPreviewList (using DataTable) -------------------- */
 interface OrderPreviewListProps {
   orders: RecentOrder[];
   loading: boolean;
+  searchTerm: string;
+  onSearchChange: (value: string) => void;
   onViewOrder: (shortId: string) => void;
+  onFullRefund: (shortId: string) => void;
+  onPartialRefund: (shortId: string) => void;
+  onSubstitute: (order: RecentOrder) => void;
   limit: number;
 }
 
-const OrderPreviewList: React.FC<OrderPreviewListProps> = ({ orders, loading, onViewOrder, limit }) => {
+const ORDER_COLUMNS: ColumnDef<RecentOrder>[] = [
+  { key: "orderShortId", label: "Order ID", getValue: (o) => o.orderShortId ?? "-" },
+  { key: "customerName", label: "Customer", getValue: (o) => o.customerName ?? "-" },
+  { key: "address", label: "Address", getValue: (o) => o.address ?? "-" },
+  { key: "originalTotal", label: "Order Total", getValue: (o) => o.originalTotal ?? 0, render: (val) => <span className="text-emerald-600 font-semibold">${(Number(val) || 0).toFixed(2)}</span> },
+  { key: "deliveryTime", label: "ETA", getValue: (o) => o.deliveryTime ? new Date(o.deliveryTime).toLocaleString() : (o.updatedAt ? new Date(o.updatedAt).toLocaleString() : "-") },
+  { key: "orderStatus", label: "Status", getValue: (o) => o.orderStatus ?? "-", render: (val) => <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${String(val).toUpperCase().includes('REFUND') ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>{val}</span> },
+  { key: "storeTotal", label: "Store Total", getValue: (o) => o.storeTotal != null ? o.storeTotal : null, render: (val) => val != null ? <span>${Number(val).toFixed(2)}</span> : <span>-</span>, hidden: true },
+  { key: "storeUuid", label: "Store UUID", getValue: (o) => o.storeUuid ?? "-", hidden: true },
+];
+
+const ORDER_DEFAULT_VISIBLE = ["orderShortId", "customerName", "address", "originalTotal", "deliveryTime", "orderStatus"];
+
+const OrderPreviewList: React.FC<OrderPreviewListProps> = ({
+  orders,
+  loading,
+  searchTerm,
+  onSearchChange,
+  onViewOrder,
+  onFullRefund,
+  onPartialRefund,
+  onSubstitute,
+  limit,
+}) => {
+  const canSubstitute = (status?: string) => {
+    const s = String(status ?? "").toUpperCase();
+    return ["CREATED", "ACCEPTED_BY_STORE", "PARTIALLY_ACCEPTED_BY_STORE", "SCHEDULED"].includes(s);
+  };
+
+  const actions: DataTableAction<RecentOrder>[] = [
+    { label: "View", className: "table-action-btn-primary", onClick: (o) => onViewOrder(o.orderShortId) },
+    { label: "Substitute", className: "px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors", onClick: (o) => onSubstitute(o), show: (o) => canSubstitute(o.orderStatus) },
+    { label: "Partial Refund", className: "px-3 py-1.5 rounded-lg text-xs font-semibold border border-yellow-200 text-yellow-700 hover:bg-yellow-50 transition-colors", onClick: (o) => onPartialRefund(o.orderShortId) },
+    { label: "Full Refund", className: "px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition-colors", onClick: (o) => onFullRefund(o.orderShortId) },
+  ];
+
   if (loading) return <div className="text-center p-8 text-lg text-gray-600">Loading recent orders...</div>;
   if (!orders || orders.length === 0) return <div className="text-center p-8 text-lg text-gray-600">No recent orders found.</div>;
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-      <h3 className="text-xl font-bold p-5 border-b text-gray-800">Recent Orders (Last {limit})</h3>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Address</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order Total</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ETA</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {orders.map(o => (
-              <tr key={o.orderShortId} className="hover:bg-orange-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{o.orderShortId}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{o.customerName}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 max-w-xs truncate">{o.address ?? "—"}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-semibold">${(o.originalTotal ?? 0).toFixed(2)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{o.deliveryTime ? new Date(o.deliveryTime).toLocaleString() : (o.updatedAt ? new Date(o.updatedAt).toLocaleString() : '—')}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${String(o.orderStatus ?? "").toUpperCase().includes('REFUND') ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
-                    {o.orderStatus}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button onClick={() => onViewOrder(o.orderShortId)} className="text-orange-600 hover:text-orange-900">View</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DataTable<RecentOrder>
+      storageKey="orders-list"
+      columns={ORDER_COLUMNS}
+      defaultVisibleColumns={ORDER_DEFAULT_VISIBLE}
+      data={orders}
+      getRowId={(o) => o.orderShortId ?? String(Math.random())}
+      loading={false}
+      actions={actions}
+      searchPlaceholder="Search by Order ID, customer, status, address..."
+      searchTerm={searchTerm}
+      onSearchChange={onSearchChange}
+      emptyMessage="No orders match current filters."
+    />
   );
 };
 
@@ -516,7 +534,7 @@ function StatusCheckboxDropdown({
 
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2 border rounded px-3 py-1">
+      <button onClick={() => setOpen(o => !o)} className="filter-select h-9 flex items-center gap-2">
         <span className="text-sm">{value.length === 0 ? placeholder : `${value.length} selected`}</span>
         <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 011.08 1.04l-4.25 4.25a.75.75 0 01-1.06 0L5.21 8.27a.75.75 0 01.02-1.06z"/></svg>
       </button>
@@ -547,16 +565,17 @@ function StatusCheckboxDropdown({
 }
 
 export function OrdersModule() {
-  const [view, setView] = useState<'landing' | 'list' | 'full_detail' | 'partial_detail'>('landing');
+  const [view, setView] = useState<'list' | 'details' | 'full_detail' | 'partial_detail'>('list');
   const [orders, setOrders] = useState<RecentOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [alert, setAlert] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [pendingRefundType, setPendingRefundType] = useState<RefundType | null>(null);
+  const [pendingRefundType, setPendingRefundType] = useState<RefundType>('partial');
+  const [searchTerm, setSearchTerm] = useState("");
 
   // filter controls (defaults present but not shown on landing)
   const [limit, setLimit] = useState<number>(45);
-  const [statusFilter, setStatusFilter] = useState<OrderStatusType[]>(["CREATED"]);
+  const [statusFilter, setStatusFilter] = useState<OrderStatusType[]>([]);
 
   const debouncedLimit = useDebounce(limit, 500);
   const debouncedStatus = useDebounce(statusFilter, 400);
@@ -566,6 +585,7 @@ export function OrdersModule() {
 
   //refund info and
   const [showAlreadyRefundedInfo, setShowAlreadyRefundedInfo] = useState(false);
+  const [alreadyRefundedOrderLabel, setAlreadyRefundedOrderLabel] = useState("");
   const tempOrderRef = useRef<Order | null>(null);
 
   useEffect(() => {
@@ -623,16 +643,20 @@ export function OrdersModule() {
 
   // When user clicks action from landing (start flow) -> go to list with defaults (limit=45, status=CREATED)
   const handleStartFetch = (type: RefundType) => {
-    setLimit(45);
-    setStatusFilter(["CREATED"]);
-    fetchRecentOrders(type, 45, ["CREATED"]);
+    setPendingRefundType(type);
+    fetchRecentOrders(type, limit, statusFilter);
   };
 
   // Auto-refetch while on list view when filters change (debounced)
   useEffect(() => {
-    if (view !== 'list' || !pendingRefundType) return;
+    if (view !== 'list') return;
     fetchRecentOrders(pendingRefundType, debouncedLimit, debouncedStatus);
   }, [debouncedLimit, debouncedStatus, view, pendingRefundType, fetchRecentOrders]);
+
+  useEffect(() => {
+    fetchRecentOrders('partial', limit, statusFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Retry handler (for network/CORS errors)
   const handleRetry = useCallback(() => {
@@ -641,20 +665,29 @@ export function OrdersModule() {
     fetchRecentOrders(last.type, last.limit, last.statuses);
   }, [fetchRecentOrders]);
 
-  const handleViewOrder = useCallback(async (orderShortId: string) => {
+  const handleViewOrder = useCallback(async (orderShortId: string, mode: 'view' | 'full' | 'partial' = 'view') => {
     setLoading(true); setAlert(null);
     try {
       const full = await apiService.getTrackedOrder(orderShortId);
 
       const status = (full?.refundStatus ?? "").toString().toUpperCase();
-      if (pendingRefundType === 'full' && status === 'FULL_REFUND') {
+      if (mode === 'full' && status === 'FULL_REFUND') {
         tempOrderRef.current = full;
+        setAlreadyRefundedOrderLabel(full?.orderShortId ?? (full?.orderUuid ?? ""));
         setShowAlreadyRefundedInfo(true);
         return;
       }
 
       setSelectedOrder(full);
-      setView(pendingRefundType === 'full' ? 'full_detail' : 'partial_detail');
+      if (mode === 'full') {
+        setPendingRefundType('full');
+        setView('full_detail');
+      } else if (mode === 'partial') {
+        setPendingRefundType('partial');
+        setView('partial_detail');
+      } else {
+        setView('details');
+      }
     } catch (err) {
       console.error("handleViewOrder error (raw):", err);
       const { message, isNetworkError } = parseApiError(err);
@@ -666,11 +699,11 @@ export function OrdersModule() {
     } finally {
       setLoading(false);
     }
-  }, [pendingRefundType, isOnline]);
+  }, [isOnline]);
 
 
   const handleBackToLanding = () => {
-    setOrders([]); setSelectedOrder(null); setPendingRefundType(null); setView('landing'); setAlert(null);
+    setSelectedOrder(null); setView('list'); setAlert(null);
   };
 
   const handleProcessFullRefund = useCallback(async (orderId: string) => {
@@ -704,42 +737,13 @@ export function OrdersModule() {
   }, [fetchRecentOrders, limit, statusFilter]);
 
   // RENDER
-  if (view === 'landing') {
-    return (
-      <div className="p-8 md:p-12 min-h-screen bg-gray-50 flex flex-col items-center">
-        <h2 className="text-4xl font-extrabold text-gray-800 mb-4">💰 Refund Management</h2>
-        <p className="text-lg text-gray-600 mb-6 text-center max-w-lg">Handle Full & Partial Refunds</p>
-
-        <div className="flex flex-col sm:flex-row gap-4 w-full max-w-lg">
-          <button
-            onClick={() => handleStartFetch('full')}
-            className="px-6 py-3 w-full sm:w-1/2 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700 transition"
-          >
-            Process Full Refund
-          </button>
-
-          <button
-            onClick={() => handleStartFetch('partial')}
-            className="px-6 py-3 w-full sm:w-1/2 bg-yellow-600 text-white font-bold rounded-xl shadow hover:bg-yellow-700 transition"
-          >
-            Process Partial Refund
-          </button>
-        </div>
-
-        <p className="text-xs text-gray-500 mt-4">When you click a button you'll be taken to the list view (limit defaults to 45 and status defaults to CREATED).</p>
-
-        {alert && <div className="mt-6"><div className={`border p-3 rounded ${alert.type === 'success' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>{alert.message}</div></div>}
-      </div>
-    );
-  }
-
   if (view === 'list') {
     return (
-      <div className="p-4 md:p-6 min-h-screen bg-gray-50">
-        <div className="flex justify-between items-center mb-6 border-b pb-2">
-          <h2 className="text-3xl font-extrabold text-gray-800">Orders</h2>
-          <div className="flex items-center gap-4">
-            <button onClick={handleBackToLanding} className="text-sm text-gray-500 hover:text-gray-700 underline">&larr; Back</button>
+      <div className="page-container-sidebar page-content p-4 md:p-6">
+        <div className="page-header flex justify-between items-center">
+          <h2 className="page-title">Orders</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={() => handleStartFetch('partial')} className="px-3 py-2 rounded-lg border border-gray-200 text-sm hover:bg-gray-50">Refresh</button>
           </div>
         </div>
 
@@ -778,13 +782,14 @@ export function OrdersModule() {
         <InfoModal
           open={showAlreadyRefundedInfo}
           title="Order Already Refunded"
-          message={`Order id: ${tempOrderRef.current?.orderShortId ?? (tempOrderRef.current?.orderUuid ?? "")} is already refunded.`}
+          message={`Order id: ${alreadyRefundedOrderLabel} is already refunded.`}
           onClose={() => {
             setShowAlreadyRefundedInfo(false);
             if (tempOrderRef.current) {
               setSelectedOrder(tempOrderRef.current);
               setView('full_detail');
               tempOrderRef.current = null;
+              setAlreadyRefundedOrderLabel("");
             }
           }}
         />
@@ -793,7 +798,7 @@ export function OrdersModule() {
         <div className="flex flex-col md:flex-row items-center gap-3 mb-4">
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium">Show:</label>
-            <input type="number" min={1} max={1000} value={limit} onChange={e => setLimit(Math.max(1, Number(e.target.value || 1)))} className="w-20 border rounded px-2 py-1" />
+            <input type="number" min={1} max={1000} value={limit} onChange={e => setLimit(Math.max(1, Number(e.target.value || 1)))} className="filter-input w-20" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -806,7 +811,63 @@ export function OrdersModule() {
           </div>
         </div>
 
-        <OrderPreviewList orders={orders} loading={loading} onViewOrder={handleViewOrder} limit={limit} />
+        <OrderPreviewList
+          orders={orders}
+          loading={loading}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          onViewOrder={(id) => handleViewOrder(id, 'view')}
+          onPartialRefund={(id) => handleViewOrder(id, 'partial')}
+          onFullRefund={(id) => handleViewOrder(id, 'full')}
+          onSubstitute={(order) => {
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('substituteOrderId', order.orderShortId);
+              window.dispatchEvent(new CustomEvent('admin:navigate', { detail: { module: 'substitute' } }));
+            }
+          }}
+          limit={limit}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'details' && selectedOrder) {
+    const canSubstitute = ["CREATED", "ACCEPTED_BY_STORE", "PARTIALLY_ACCEPTED_BY_STORE", "SCHEDULED"].includes(
+      String(selectedOrder.orderStatus ?? "").toUpperCase()
+    );
+
+    return (
+      <div className="page-container-sidebar page-content p-4 md:p-6">
+        <div className="page-header flex justify-between items-center">
+          <h2 className="page-title">Order Detail</h2>
+          <button onClick={handleBackToLanding} className="text-sm text-gray-500 hover:text-gray-700 underline">&larr; Back to orders</button>
+        </div>
+        <OrderDetailsDialog order={selectedOrder} />
+
+        <div className="mt-4 bg-white border border-gray-200 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Actions</h3>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setView('partial_detail')} className="px-3 py-2 rounded-lg text-sm font-semibold border border-yellow-200 text-yellow-700 hover:bg-yellow-50 transition-colors">
+              Partial Refund
+            </button>
+            <button onClick={() => setView('full_detail')} className="px-3 py-2 rounded-lg text-sm font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition-colors">
+              Full Refund
+            </button>
+            {canSubstitute && (
+              <button
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    sessionStorage.setItem('substituteOrderId', selectedOrder.orderShortId ?? selectedOrder.orderUuid);
+                    window.dispatchEvent(new CustomEvent('admin:navigate', { detail: { module: 'substitute' } }));
+                  }
+                }}
+                className="px-3 py-2 rounded-lg text-sm font-semibold border border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors"
+              >
+                Substitute Item
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -821,3 +882,6 @@ export function OrdersModule() {
 
   return null;
 }
+
+
+

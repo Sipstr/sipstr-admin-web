@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { apiService } from "@/services/apiService";
 import {
   OfferDetailRequest,
   OfferDetailResponse,
   OfferDetailRequest as OfferDetailRequestType,
 } from "@/services/types";
-
+import { PaginationControls } from "./PaginationControls";
+import { Pencil, Trash2, ToggleLeft, ToggleRight, Eye } from "lucide-react";
 
 /* ---------- helpers ---------- */
 function toBackendDateString(datetimeLocal?: string | null): string {
@@ -30,16 +31,24 @@ function formatDate(dt?: string) {
   try {
     const d = new Date(dt);
     if (isNaN(d.getTime())) return String(dt);
-    return d.toLocaleString(); // uses user's locale
+    return d.toLocaleString();
   } catch {
     return String(dt);
   }
 }
 
-
 function pad(s: string | number) {
   const str = String(s);
   return str.length === 1 ? `0${str}` : str;
+}
+
+type SortDirection = "asc" | "desc";
+
+function compareValues(a: unknown, b: unknown) {
+  const aNum = Number(a);
+  const bNum = Number(b);
+  if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) return aNum - bNum;
+  return String(a ?? "").localeCompare(String(b ?? ""));
 }
 
 /* ---------- component ---------- */
@@ -49,11 +58,11 @@ export function CouponsModule() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
-  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Form & Modal
   const [showForm, setShowForm] = useState(false);
-  const [isGlobalOffer, setIsGlobalOffer] = useState(false); // <-- NEW: whether the form is for a global (Sipstr) offer
+  const [isGlobalOffer, setIsGlobalOffer] = useState(false);
 
   const initialForm: OfferDetailRequestType = {
     offerId: undefined,
@@ -69,8 +78,6 @@ export function CouponsModule() {
     maxTotalUsage: 0,
     requiredVoucherCount: 0,
     description: "",
-    // couponDetail shape we will use across read/write:
-    // { couponId?, offerId?, couponCode, websiteDisplayMsg, maxUsagePerUser, usabilityCount, usabilityOptions }
     couponDetail: null,
   };
   const [form, setForm] = useState<OfferDetailRequestType>(initialForm);
@@ -81,24 +88,64 @@ export function CouponsModule() {
   const [consumption, setConsumption] = useState<OfferDetailResponse | null>(null);
   const [consumptionLoading, setConsumptionLoading] = useState(false);
 
-  useEffect(() => {
-    // no-op
-  }, []);
+  // Pagination
+  const [offersPage, setOffersPage] = useState(1);
+  const [offersPageSize, setOffersPageSize] = useState(20);
+  const [consumptionPage, setConsumptionPage] = useState(1);
+  const [consumptionPageSize, setConsumptionPageSize] = useState(10);
 
-  // Convert `error` into the small centered alert popup (keeps existing setError usages intact)
+  // Search & Sort & Filters
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortState, setSortState] = useState<{ key: string; dir: SortDirection } | null>(null);
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => {
+    if (typeof window === "undefined") return ["offerId", "name", "method", "type", "couponCode", "discount", "startDateTime", "endDateTime", "status"];
+    try {
+      const saved = window.localStorage.getItem("offers-visible-columns-v1");
+      if (saved) { const p = JSON.parse(saved); if (Array.isArray(p) && p.length > 0) return p; }
+    } catch {}
+    return ["offerId", "name", "method", "type", "couponCode", "discount", "startDateTime", "endDateTime", "status"];
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem("offers-visible-columns-v1", JSON.stringify(visibleColumnKeys)); } catch {}
+  }, [visibleColumnKeys]);
+
+  const ALL_COLUMNS = [
+    { key: "offerId", label: "ID" },
+    { key: "name", label: "Name" },
+    { key: "method", label: "Method" },
+    { key: "type", label: "Type" },
+    { key: "couponCode", label: "Code" },
+    { key: "discount", label: "Discount" },
+    { key: "startDateTime", label: "Start" },
+    { key: "endDateTime", label: "End" },
+    { key: "status", label: "Status" },
+  ];
+
+  const COLUMNS = useMemo(() => ALL_COLUMNS.filter((c) => visibleColumnKeys.includes(c.key)), [visibleColumnKeys]);
+
+  const toggleColumn = (key: string) => {
+    setVisibleColumnKeys((prev) => {
+      if (prev.includes(key)) { if (prev.length === 1) return prev; return prev.filter((k) => k !== key); }
+      return [...prev, key];
+    });
+  };
+
   useEffect(() => {
     if (!error) return;
-    setAlertMessage(error);
+    setBanner({ type: "error", message: error });
     setError(null);
   }, [error]);
 
   /* ---------- load offers & normalize ---------- */
-
   async function loadGlobalOffers() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getAllGlobalOffers(); // <-- assumes this exists
+      const data = await apiService.getAllGlobalOffers();
       const normalized = (Array.isArray(data) ? data : []).map((o: any) => ({
         offerId: o.offerId,
         storeId: o.storeId,
@@ -108,13 +155,14 @@ export function CouponsModule() {
         startDateTime: o.startDateTime,
         endDateTime: o.endDateTime,
         isActive: o.isActive,
-        status: o.status,
+        status: o.isActive ? "Active" : "Inactive",
         discount: o.discount ?? null,
         couponCode: o.offerCode ?? (o.coupons?.couponCode ?? null),
         couponId: o.couponId ?? (o.coupons?.couponId ?? null),
         raw: o,
       }));
       setOffers(normalized);
+      setOffersPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load global offers");
       setOffers([]);
@@ -135,9 +183,6 @@ export function CouponsModule() {
       }
       const parsedId = Number(id);
       const data = await apiService.getAllOffers(parsedId);
-
-      console.debug("raw offers:", data);
-
       const normalized = (Array.isArray(data) ? data : []).map((o: any) => ({
         offerId: o.offerId,
         storeId: o.storeId,
@@ -147,15 +192,14 @@ export function CouponsModule() {
         startDateTime: o.startDateTime,
         endDateTime: o.endDateTime,
         isActive: o.isActive,
-        status: o.status,
-        // discount should be numeric or null - don't set it to offerCode
+        status: o.isActive ? "Active" : "Inactive",
         discount: o.discount ?? null,
         couponCode: o.offerCode ?? (o.coupons?.couponCode ?? null),
         couponId: o.couponId ?? (o.coupons?.couponId ?? null),
         raw: o,
       }));
-
       setOffers(normalized);
+      setOffersPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load offers");
       setOffers([]);
@@ -172,7 +216,6 @@ export function CouponsModule() {
     setShowForm(true);
   }
 
-  // NEW: open Sipstr (global) offer create
   function openSipstrCreate() {
     setForm({ ...initialForm, storeId: undefined });
     setIsEditing(false);
@@ -180,30 +223,21 @@ export function CouponsModule() {
     setShowForm(true);
   }
 
-  /* ---------- edit flow (fetch full details) ---------- */
+  /* ---------- edit flow ---------- */
   async function openEdit(offer: any) {
     if (!offer?.offerId) return;
     setEditLoading(true);
     setError(null);
-
     try {
       const detail = await apiService.getOfferDetailView(offer.offerId);
-      console.debug("offer-details response for edit:", detail);
-
       const toInputValue = (s?: string | null) => {
         if (!s) return "";
         return s.length >= 16 ? s.slice(0, 16) : s.replace(" ", "T").slice(0, 16);
       };
-
-      // Resolve coupon object (may be nested or top-level in different shapes)
       const couponObj = detail.coupons ?? detail.coupon ?? null;
       const couponId = couponObj?.couponId ?? detail.couponId ?? undefined;
       const couponCode = couponObj?.couponCode ?? detail.offerCode ?? detail.couponCode ?? "";
-      const websiteMsg =
-        couponObj?.websiteDisplayMsg ??
-        couponObj?.websiteDisplayMessage ??
-        detail.websiteDisplayMsg ??
-        "";
+      const websiteMsg = couponObj?.websiteDisplayMsg ?? couponObj?.websiteDisplayMessage ?? detail.websiteDisplayMsg ?? "";
 
       const mapped: OfferDetailRequestType = {
         offerId: detail.offerId ?? offer.offerId,
@@ -235,7 +269,6 @@ export function CouponsModule() {
 
       setForm(mapped);
       setIsEditing(true);
-      // if offer has no storeId -> treat as global
       setIsGlobalOffer(mapped.storeId === undefined || mapped.storeId === null);
       setShowForm(true);
     } catch (err) {
@@ -245,27 +278,15 @@ export function CouponsModule() {
     }
   }
 
-  /* ---------- submit (create/update) ---------- */
+  /* ---------- submit ---------- */
   async function handleSubmit() {
     setError(null);
+    if (!form.name?.trim()) { setError("Offer name is required"); return; }
+    if (!form.method) { setError("Offer method is required"); return; }
+    if (!form.startDateTime || !form.endDateTime) { setError("Start and end date/time are required"); return; }
 
-    if (!form.name?.trim()) {
-      setError("Offer name is required");
-      return;
-    }
-    if (!form.method) {
-      setError("Offer method is required");
-      return;
-    }
-    if (!form.startDateTime || !form.endDateTime) {
-      setError("Start and end date/time are required");
-      return;
-    }
-
-    // build payload and normalize couponDetail to backend schema
     const payload: OfferDetailRequest = {
       ...form,
-      // If this is a global offer, ensure storeId is undefined so backend treats it as non-store specific
       storeId: isGlobalOffer ? undefined : form.storeId ?? (storeId ? Number(storeId) : undefined),
       startDateTime: toBackendDateString(form.startDateTime),
       endDateTime: toBackendDateString(form.endDateTime),
@@ -277,26 +298,13 @@ export function CouponsModule() {
       couponDetail:
         form.method === "COUPON" && form.couponDetail
           ? {
-              // forward backend-expected keys
               id: (form.couponDetail as any).couponId ?? undefined,
-              offerId: form.offerId??0,
+              offerId: form.offerId ?? 0,
               code: (form.couponDetail as any).couponCode ?? "",
-              websiteDisplayMessage:
-                (form.couponDetail as any).websiteDisplayMsg ??
-                (form.couponDetail as any).websiteDisplayMessage ??
-                "",
-              maxUsagePerUser:
-                (form.couponDetail as any).maxUsagePerUser ??
-                (form.couponDetail as any).maxUsage ??
-                0,
-              totalUsabilityCount:
-                (form.couponDetail as any).usabilityCount ??
-                (form.couponDetail as any).totalUsabilityCount ??
-                0,
-              usabilityOption:
-                (form.couponDetail as any).usabilityOptions ??
-                (form.couponDetail as any).usabilityOption ??
-                undefined,
+              websiteDisplayMessage: (form.couponDetail as any).websiteDisplayMsg ?? (form.couponDetail as any).websiteDisplayMessage ?? "",
+              maxUsagePerUser: (form.couponDetail as any).maxUsagePerUser ?? 0,
+              totalUsabilityCount: (form.couponDetail as any).usabilityCount ?? (form.couponDetail as any).totalUsabilityCount ?? 0,
+              usabilityOption: (form.couponDetail as any).usabilityOptions ?? (form.couponDetail as any).usabilityOption ?? undefined,
             }
           : null,
     };
@@ -307,16 +315,11 @@ export function CouponsModule() {
       } else {
         await apiService.createOffer(payload);
       }
-
-      // REFRESH LOGIC: after save, reload the proper list
-      if (isGlobalOffer) {
-        await loadGlobalOffers();
-      } else {
-        // prefer the payload.storeId (if provided) else the manual storeId state
+      if (isGlobalOffer) { await loadGlobalOffers(); } else {
         const reloadStoreId = payload.storeId ?? (storeId ? Number(storeId) : undefined);
         if (reloadStoreId) await loadOffersForStore(String(reloadStoreId));
       }
-
+      setBanner({ type: "success", message: isEditing ? "Offer updated successfully." : "Offer created successfully." });
       setShowForm(false);
       setIsEditing(false);
       setIsGlobalOffer(false);
@@ -328,12 +331,12 @@ export function CouponsModule() {
 
   /* ---------- delete / toggle / consumption ---------- */
   async function handleDelete(offerId: number) {
-    if (!confirm("Are you sure you want to delete this offer? This will mark it expired.")) return;
+    if (!confirm("Are you sure you want to delete this offer?")) return;
     try {
       await apiService.deleteOffer(offerId);
-      // refresh after delete
       if (isGlobalOffer) await loadGlobalOffers(); else if (storeId) await loadOffersForStore(storeId);
       setOffers((prev) => prev.filter((x) => x.offerId !== offerId));
+      setBanner({ type: "success", message: "Offer deleted." });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete offer");
     }
@@ -341,572 +344,440 @@ export function CouponsModule() {
 
   async function handleToggle(offerId: number) {
     try {
-      // Optimistically toggle in UI first
-      setOffers((prev) =>
-        prev.map((offer) =>
-          offer.offerId === offerId
-            ? { ...offer, isActive: !offer.isActive }
-            : offer
-        )
-      );
-
-      // Call backend
+      setOffers((prev) => prev.map((o) => o.offerId === offerId ? { ...o, isActive: !o.isActive, status: !o.isActive ? "Active" : "Inactive" } : o));
       await apiService.toggleOfferStatus(offerId);
-
-      // refresh after toggle to ensure consistent status
       if (isGlobalOffer) await loadGlobalOffers(); else if (storeId) await loadOffersForStore(storeId);
     } catch (err) {
-      // Revert if backend fails
-      setOffers((prev) =>
-        prev.map((offer) =>
-          offer.offerId === offerId
-            ? { ...offer, isActive: !offer.isActive }
-            : offer
-        )
-      );
+      setOffers((prev) => prev.map((o) => o.offerId === offerId ? { ...o, isActive: !o.isActive, status: !o.isActive ? "Active" : "Inactive" } : o));
       setError(err instanceof Error ? err.message : "Failed to toggle offer status");
     }
   }
 
-async function openConsumptionModal(offerId: number) {
-  setConsumptionLoading(true);
-  setShowConsumption(true);
-  try {
-    const data = await apiService.getConsumptionHistory(offerId);
-    setConsumption(data);
-  } catch (error: any) {
-    // Backend probably returns a message like "Offer has not been used by any user yet."
-    const message =
-      error?.response?.data?.message ??
-      error?.message ??
-      "Offer has not been used by any user yet.";
-    // close the consumption modal (we don't want to show the empty modal)
-    setShowConsumption(false);
-    // clear any stale consumption
-    setConsumption(null);
-    // show simple alert popup
-    setAlertMessage(message);
-  } finally {
-    setConsumptionLoading(false);
+  async function openConsumptionModal(offerId: number) {
+    setConsumptionLoading(true);
+    setShowConsumption(true);
+    try {
+      const data = await apiService.getConsumptionHistory(offerId);
+      setConsumption(data);
+    } catch (error: any) {
+      const message = error?.response?.data?.message ?? error?.message ?? "Offer has not been used by any user yet.";
+      setShowConsumption(false);
+      setConsumption(null);
+      setBanner({ type: "error", message });
+    } finally {
+      setConsumptionLoading(false);
+    }
   }
-}
 
+  /* ---------- sorting / filtering / pagination ---------- */
+  const filteredOffers = useMemo(() => {
+    let rows = [...offers];
+    const q = searchTerm.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter((o) =>
+        Object.values(o).some((v) => String(v ?? "").toLowerCase().includes(q))
+      );
+    }
+    Object.entries(columnFilters).forEach(([key, filter]) => {
+      if (!filter) return;
+      rows = rows.filter((o) => String(o[key] ?? "").toLowerCase().includes(filter.toLowerCase()));
+    });
+    return rows;
+  }, [offers, searchTerm, columnFilters]);
 
+  const sortedOffers = useMemo(() => {
+    if (!sortState) return filteredOffers;
+    const copy = [...filteredOffers];
+    copy.sort((a, b) => {
+      const compared = compareValues(a[sortState.key], b[sortState.key]);
+      return sortState.dir === "asc" ? compared : -compared;
+    });
+    return copy;
+  }, [filteredOffers, sortState]);
 
-  /* ---------- render helpers ---------- */
-  const renderRows = () =>
-    offers.map((o) => (
-      <tr key={o.offerId} style={{ borderBottom: "1px solid #eee" }}>
-        <td style={{ padding: "10px" }}>{o.offerId}</td>
-        <td style={{ padding: "10px" }}>{o.name}</td>
-        <td style={{ padding: "10px" }}>{o.method}</td>
-        <td style={{ padding: "10px" }}>{o.type}</td>
-        <td style={{ padding: "10px" }}>{o.couponCode ?? "-"}</td>
-        <td style={{ padding: "10px" }}>
-          {o.startDateTime ? o.startDateTime.replace("T", " ") : "-"} → {o.endDateTime ? o.endDateTime.replace("T", " ") : "-"}
-        </td>
-        <td style={{ padding: "10px" }}>{o.isActive ? "✅ Active" : "⛔ Not Active"}</td>
-        <td style={{ padding: "10px", display: "flex", gap: 8 }}>
-          <button onClick={() => openEdit(o)} style={actionBtnStyle}>
-            Edit
-          </button>
-          <button onClick={() => handleDelete(o.offerId)} style={{ ...actionBtnStyle, backgroundColor: "#ff4d4f" }}>
-            Delete
-          </button>
-          <button onClick={() => handleToggle(o.offerId)} style={actionBtnStyle}>
-            Toggle
-          </button>
-          <button onClick={() => openConsumptionModal(o.offerId)} style={actionBtnStyle}>
-            Consumption
-          </button>
-        </td>
-      </tr>
-    ));
+  const offersTotalPages = Math.max(1, Math.ceil(sortedOffers.length / offersPageSize));
+  const pagedOffers = useMemo(() => {
+    const start = (offersPage - 1) * offersPageSize;
+    return sortedOffers.slice(start, start + offersPageSize);
+  }, [sortedOffers, offersPage, offersPageSize]);
 
+  useEffect(() => {
+    setOffersPage((p) => Math.min(Math.max(1, p), offersTotalPages));
+  }, [offersTotalPages]);
+
+  const consumptionUsers = consumption?.users ?? [];
+  const consumptionTotalPages = Math.max(1, Math.ceil(consumptionUsers.length / consumptionPageSize));
+  const pagedConsumptionUsers = useMemo(() => {
+    const start = (consumptionPage - 1) * consumptionPageSize;
+    return consumptionUsers.slice(start, start + consumptionPageSize);
+  }, [consumptionUsers, consumptionPage, consumptionPageSize]);
+
+  useEffect(() => { setConsumptionPage(1); }, [showConsumption, consumption?.offerId, consumptionPageSize]);
+  useEffect(() => { setConsumptionPage((p) => Math.min(Math.max(1, p), consumptionTotalPages)); }, [consumptionTotalPages]);
+
+  const onToggleSort = (key: string) => {
+    setSortState((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+    });
+  };
+
+  const setFilterValue = (key: string, value: string) => {
+    setColumnFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  /* ---------- render ---------- */
   return (
-    <div>
-      <h2 style={{ marginBottom: 12 }}>Coupons / Offers</h2>
-
-      {/* Search bar */}
-      <div style={{ marginBottom: 16, display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          placeholder="Enter storeId (number)"
-          value={storeId}
-          onChange={(e) => setStoreId(e.target.value)}
-          style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 6, minWidth: 220 }}
-        />
-        <button onClick={() => loadOffersForStore()} style={primaryBtnStyle}>
-          Search
-        </button>
-        <button onClick={openCreate} style={{ ...primaryBtnStyle, backgroundColor: "#2d8cff" }}>
-          + Add Offer
-        </button>
-        {/* NEW button for Sipstr Offer (global) */}
-        <button onClick={openSipstrCreate} style={{ ...primaryBtnStyle, backgroundColor: "#6c63ff" }}>
-          Sipstr Offer
-        </button>
-        <button onClick={() => loadGlobalOffers()} style={{ ...primaryBtnStyle, backgroundColor: "#4b5563" }}>
-          Load Global Offers
-        </button>
+    <div className="page-container-sidebar page-content space-y-5">
+      <div className="page-header">
+        <h2 className="page-title">Offers & Coupons</h2>
+        <p className="page-subtitle">Manage store offers, global Sipstr offers, and coupons.</p>
       </div>
 
-      {/* show small alert popup instead of the big red banner when alertMessage is active */}
-      {!alertMessage && error && (
-        <div style={{ backgroundColor: "#fee", color: "#c33", padding: 12, borderRadius: 6, marginBottom: 12 }}>{error}</div>
+      {/* Action bar */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <div className="flex flex-col md:flex-row gap-3 md:items-center">
+          <input
+            className="filter-input w-full md:w-64"
+            value={storeId}
+            onChange={(e) => setStoreId(e.target.value)}
+            placeholder="Enter Store ID (number)"
+          />
+          <button onClick={() => loadOffersForStore()} className="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 text-white hover:bg-orange-600 transition-colors">
+            Search Store
+          </button>
+          <button onClick={() => loadGlobalOffers()} className="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-600 text-white hover:bg-gray-700 transition-colors">
+            Load Global
+          </button>
+          <div className="flex-1" />
+          <button onClick={openCreate} className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-500 text-white hover:bg-blue-600 transition-colors">
+            + Store Offer
+          </button>
+          <button onClick={openSipstrCreate} className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-500 text-white hover:bg-violet-600 transition-colors">
+            + Sipstr Offer
+          </button>
+        </div>
+      </div>
+
+      {/* Search + Column Picker */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-3 md:items-center">
+        <input
+          className="filter-input flex-1"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search offers by name, code, method..."
+        />
+        <div className="relative">
+          <button onClick={() => setShowColumnPicker((p) => !p)} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 hover:bg-gray-50 transition-colors flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            Columns
+          </button>
+          {showColumnPicker && (
+            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-3 z-30 min-w-[180px]">
+              {ALL_COLUMNS.map((col) => (
+                <label key={col.key} className="flex items-center gap-2 py-1 text-sm cursor-pointer hover:bg-gray-50 px-1 rounded">
+                  <input type="checkbox" checked={visibleColumnKeys.includes(col.key)} onChange={() => toggleColumn(col.key)} className="rounded border-gray-300" />
+                  {col.label}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Banner */}
+      {banner && (
+        <div className={`text-sm rounded-lg px-3 py-2 border flex items-center justify-between ${banner.type === "success" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-red-700 bg-red-50 border-red-200"}`}>
+          <span>{banner.message}</span>
+          <button onClick={() => setBanner(null)} className="ml-3 text-xs font-semibold opacity-60 hover:opacity-100">✕</button>
+        </div>
       )}
 
-      {/* Offers table */}
-      <div style={{ background: "white", borderRadius: 8, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead style={{ background: "#fafafa" }}>
-            <tr>
-              <th style={{ textAlign: "left", padding: 12 }}>ID</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Name</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Method</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Type</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Code</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Period</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Status</th>
-              <th style={{ textAlign: "left", padding: 12 }}>Actions</th>
+      {/* Table */}
+      <div className="table-shell">
+        <table className="table-base">
+          <thead>
+            <tr className="table-head-row">
+              {COLUMNS.map((col) => {
+                const isCurrent = sortState?.key === col.key;
+                const arrow = !isCurrent ? "↕" : sortState?.dir === "asc" ? "↑" : "↓";
+                return (
+                  <th key={col.key} className="table-head-cell">
+                    <button className="inline-flex items-center gap-1 hover:text-orange-600" onClick={() => onToggleSort(col.key)}>
+                      <span>{col.label}</span>
+                      <span className="text-xs">{arrow}</span>
+                    </button>
+                  </th>
+                );
+              })}
+              <th className="table-head-cell">Actions</th>
+            </tr>
+            <tr className="table-head-row">
+              {COLUMNS.map((col) => (
+                <th key={`${col.key}-filter`} className="table-head-cell py-2 normal-case">
+                  <input
+                    className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
+                    value={columnFilters[col.key] ?? ""}
+                    onChange={(e) => setFilterValue(col.key, e.target.value)}
+                    placeholder="Filter"
+                  />
+                </th>
+              ))}
+              <th className="table-head-cell py-2"></th>
             </tr>
           </thead>
-          <tbody>{loading ? <tr><td colSpan={8} style={{ padding: 20 }}>Loading...</td></tr> : renderRows()}</tbody>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={COLUMNS.length + 1} className="table-cell text-center text-gray-500 py-6">Loading offers...</td></tr>
+            ) : pagedOffers.length === 0 ? (
+              <tr><td colSpan={COLUMNS.length + 1} className="table-cell text-center text-gray-500 py-6">No offers found. Search by store ID or load global offers.</td></tr>
+            ) : (
+              pagedOffers.map((o) => (
+                <tr key={o.offerId} className="table-row table-row-hover">
+                  <td className="table-cell">{o.offerId}</td>
+                  <td className="table-cell font-medium">{o.name || "-"}</td>
+                  <td className="table-cell">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{o.method}</span>
+                  </td>
+                  <td className="table-cell">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700">{o.type}</span>
+                  </td>
+                  <td className="table-cell text-gray-600">{o.couponCode ?? "-"}</td>
+                  <td className="table-cell text-gray-600">{o.discount ?? "-"}</td>
+                  <td className="table-cell text-gray-600 text-xs">{o.startDateTime ? formatDate(o.startDateTime) : "-"}</td>
+                  <td className="table-cell text-gray-600 text-xs">{o.endDateTime ? formatDate(o.endDateTime) : "-"}</td>
+                  <td className="table-cell">
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${o.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-200 text-gray-700"}`}>
+                      {o.isActive ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="table-cell">
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => openEdit(o)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-200 text-gray-600 hover:bg-gray-50" title="Edit">
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => handleDelete(o.offerId)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-red-200 text-red-600 hover:bg-red-50" title="Delete">
+                        <Trash2 size={14} />
+                      </button>
+                      <button onClick={() => handleToggle(o.offerId)} className={`inline-flex h-8 w-8 items-center justify-center rounded border ${o.isActive ? "border-emerald-200 text-emerald-600 hover:bg-emerald-50" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`} title="Toggle Status">
+                        {o.isActive ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                      </button>
+                      <button onClick={() => openConsumptionModal(o.offerId)} className="inline-flex h-8 w-8 items-center justify-center rounded border border-sky-200 text-sky-600 hover:bg-sky-50" title="Consumption">
+                        <Eye size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
         </table>
       </div>
 
-      {/* Add/Edit Modal */}
-        {showForm && (
-        <div style={modalOverlayStyle}>
-            <div style={modalStyle}>
-            {/* Header (fixed at top of modal) */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                <h3 style={{ margin: 0 }}>
-                {isEditing ? "Edit Offer" : isGlobalOffer ? "Create Sipstr (Global) Offer" : "Create Offer"}
-                </h3>
-                <button
-                onClick={() => {
-                    setShowForm(false);
-                    setIsEditing(false);
-                    setIsGlobalOffer(false);
-                    setForm(initialForm);
-                }}
-                style={{
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid #e2e8f0",
-                    background: "#fff",
-                    cursor: "pointer",
-                }}
-                aria-label="Close"
-                >
-                ✕
-                </button>
-            </div>
-
-            {/* Scrollable body */}
-            <div
-                style={{
-                overflowY: "auto",
-                maxHeight: "65vh", // <-- controls scrollable height of the form
-                paddingRight: 8,
-                marginTop: 12,
-                }}
-            >
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                    <label style={labelStyle}>Name</label>
-                    <input value={form.name ?? ""} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Store ID</label>
-                    {/* If this is a global offer, show a read-only badge instead of an editable store id */}
-                    {isGlobalOffer ? (
-                    <div style={{ padding: "8px 10px", border: "1px dashed #ddd", borderRadius: 6, background: "#fafafa" }}>
-                        Global Offer — not store specific
-                    </div>
-                    ) : (
-                    <input
-                        type="number"
-                        value={form.storeId ?? (storeId ? Number(storeId) : "")}
-                        onChange={(e) => setForm((p) => ({ ...p, storeId: e.target.value ? Number(e.target.value) : undefined }))}
-                        style={inputStyle}
-                    />
-                    )}
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Method</label>
-                    <select
-                    value={form.method}
-                    onChange={(e) =>
-                        setForm((prev) => {
-                        const method = e.target.value;
-                        if (method === "COUPON") {
-                            return {
-                            ...prev,
-                            method,
-                            couponDetail:
-                                prev.couponDetail ??
-                                ({
-                                couponId: undefined,
-                                offerId: prev.offerId,
-                                couponCode: "",
-                                websiteDisplayMsg: "",
-                                maxUsagePerUser: 0,
-                                usabilityCount: 0,
-                                usabilityOptions: undefined,
-                                } as any),
-                            };
-                        }
-                        return { ...prev, method };
-                        })
-                    }
-                    style={inputStyle}
-                    >
-                    <option value="COUPON">COUPON</option>
-                    <option value="VOUCHER">VOUCHER</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Type</label>
-                    <select value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as any }))} style={inputStyle}>
-                    <option value="FLAT">FLAT</option>
-                    <option value="PERCENTAGE">PERCENTAGE</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Discount</label>
-                    <input type="number" value={form.discount ?? ""} onChange={(e) => setForm((p) => ({ ...p, discount: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Allowed Max Discount</label>
-                    <input type="number" value={form.allowedMaxDiscount ?? ""} onChange={(e) => setForm((p) => ({ ...p, allowedMaxDiscount: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Min Spend Amount</label>
-                    <input type="number" value={form.minSpendAmount ?? ""} onChange={(e) => setForm((p) => ({ ...p, minSpendAmount: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Max Total Usage</label>
-                    <input type="number" value={form.maxTotalUsage ?? ""} onChange={(e) => setForm((p) => ({ ...p, maxTotalUsage: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Required Voucher Count</label>
-                    <input type="number" value={form.requiredVoucherCount ?? ""} onChange={(e) => setForm((p) => ({ ...p, requiredVoucherCount: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Description</label>
-                    <input value={form.description ?? ""} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>Start Date & Time</label>
-                    <input type="datetime-local" value={form.startDateTime ?? ""} onChange={(e) => setForm((p) => ({ ...p, startDateTime: e.target.value }))} style={inputStyle} />
-                </div>
-
-                <div>
-                    <label style={labelStyle}>End Date & Time</label>
-                    <input type="datetime-local" value={form.endDateTime ?? ""} onChange={(e) => setForm((p) => ({ ...p, endDateTime: e.target.value }))} style={inputStyle} />
-                </div>
-
-                {/* Coupon specific fields */}
-                {form.method === "COUPON" && (
-                    <div style={{ marginTop: 12, padding: 12, border: "1px solid #eee", borderRadius: 6, gridColumn: "1 / -1" }}>
-                    <h4 style={{ margin: "0 0 8px 0" }}>Coupon Details</h4>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                        <div>
-                        <label style={labelStyle}>Coupon Code</label>
-                        <input
-                            value={(form.couponDetail as any)?.couponCode ?? ""}
-                            onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), couponCode: e.target.value } }))}
-                            style={inputStyle}
-                        />
-                        </div>
-
-                        <div>
-                        <label style={labelStyle}>Website Display Message</label>
-                        <input
-                            value={(form.couponDetail as any)?.websiteDisplayMsg ?? ""}
-                            onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), websiteDisplayMsg: e.target.value } }))}
-                            style={inputStyle}
-                        />
-                        </div>
-
-                        <div>
-                        <label style={labelStyle}>Max Usage Per User</label>
-                        <input
-                            type="number"
-                            value={(form.couponDetail as any)?.maxUsagePerUser ?? ""}
-                            onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), maxUsagePerUser: Number(e.target.value) } }))}
-                            style={inputStyle}
-                        />
-                        </div>
-
-                        <div>
-                        <label style={labelStyle}>Usability Count</label>
-                        <input
-                            type="number"
-                            value={(form.couponDetail as any)?.usabilityCount ?? ""}
-                            onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), usabilityCount: Number(e.target.value) } }))}
-                            style={inputStyle}
-                        />
-                        </div>
-
-                        <div>
-                        <label style={labelStyle}>Usability Option</label>
-                        <select
-                            value={(form.couponDetail as any)?.usabilityOptions ?? ""}
-                            onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), usabilityOptions: e.target.value as any } }))}
-                            style={inputStyle}
-                        >
-                            <option value="">Select</option>
-                            <option value="MONTH">MONTH</option>
-                            <option value="QUARTER">QUARTER</option>
-                            <option value="HALF_YEAR">HALF_YEAR</option>
-                            <option value="YEAR">YEAR</option>
-                        </select>
-                        </div>
-                    </div>
-                    </div>
-                )}
-                </div>
-            </div>
-
-            {/* Sticky footer (always visible) */}
-            <div
-                style={{
-                position: "sticky",
-                bottom: 0,
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-                paddingTop: 12,
-                paddingBottom: 6,
-                background: "linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,1))",
-                }}
-            >
-                <button
-                onClick={() => {
-                    setShowForm(false);
-                    setIsEditing(false);
-                    setIsGlobalOffer(false);
-                    setForm(initialForm);
-                }}
-                style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", background: "white" }}
-                >
-                Cancel
-                </button>
-                <button onClick={handleSubmit} style={{ ...primaryBtnStyle }}>
-                {isEditing ? "Update Offer" : "Create Offer"}
-                </button>
-            </div>
-            </div>
-        </div>
-        )}
-
-
-      {/* Consumption modal */}
-      {showConsumption && (
-  <div style={modalOverlayStyle} onClick={() => setShowConsumption(false)}>
-    <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-        <div>
-          <h3 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>Consumption History</h3>
-          <div style={{ marginTop: 8, color: "#475569", fontSize: 13 }}>
-            <strong>Offer ID:</strong> {consumption?.offerId ?? "-"} {" "}
-            <span style={{ marginLeft: 12, display: "inline-flex", gap: 8, alignItems: "center" }}>
-              <span style={{ background: "#eef2ff", color: "#4f46e5", padding: "4px 8px", borderRadius: 999, fontSize: 12 }}>
-                Coupon: {consumption?.couponCode ?? "-"}
-              </span>
-              <span style={{ background: "#f1f5f9", color: "#344e6f", padding: "4px 8px", borderRadius: 999, fontSize: 12 }}>
-                Store: {consumption?.storeId ?? "-"}
-              </span>
-            </span>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => { setShowConsumption(false); }}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #e2e8f0",
-              background: "#ffffff",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-            aria-label="Close"
-          >
-            X
-          </button>
-        </div>
+      {/* Pagination */}
+      <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+        <PaginationControls
+          page={offersPage}
+          totalPages={offersTotalPages}
+          totalItems={sortedOffers.length}
+          pageSize={offersPageSize}
+          onPageChange={setOffersPage}
+          onPageSizeChange={(next) => { setOffersPageSize(next); setOffersPage(1); }}
+          disabled={loading}
+          showPageSize
+        />
       </div>
 
-      {/* Body */}
-      <div style={{ borderRadius: 8, overflow: "hidden", background: "#fff", boxShadow: "inset 0 1px 0 rgba(0,0,0,0.02)" }}>
-        {consumptionLoading ? (
-          <div style={{ padding: 28, textAlign: "center", color: "#64748b" }}>Loading...</div>
-        ) : (consumption && (consumption.users ?? []).length > 0) ? (
-          <div style={{ overflow: "auto", maxHeight: "60vh" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
-              <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 2 }}>
-                <tr>
-                  <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 13, color: "#0f172a" }}>User ID</th>
-                  <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 13, color: "#0f172a" }}>UUID</th>
-                  <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 13, color: "#0f172a" }}>Name</th>
-                  <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 13, color: "#0f172a" }}>Phone</th>
-                  <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 13, color: "#0f172a" }}>Used At</th>
-                </tr>
-              </thead>
-              <tbody>
-                    {consumption.users.map((u, idx) => (
-                        <tr key={u.uuid ?? idx} style={{ background: idx % 2 === 0 ? "#ffffff" : "#fbfdff" }}>
-                        <td style={{ padding: "10px 14px", color: "#0f172a", fontSize: 13 }}>{u.id ?? "-"}</td>
-                        <td
-                            style={{
-                            padding: "10px 14px",
-                            color: "#0b1220",
-                            fontSize: 13,
-                            maxWidth: 220,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            }}
-                        >
-                            {String(u.uuid ?? "-")}
-                        </td>
-                        <td style={{ padding: "10px 14px", color: "#0b1220", fontSize: 13 }}>{u.fullName ?? "-"}</td>
-                        <td style={{ padding: "10px 14px", color: "#0b1220", fontSize: 13 }}>
-                            {u.mobileNumber ?? "-"}
-                        </td>
+      {/* Add/Edit Modal */}
+      {showForm && (
+        <div className="modal-overlay" onClick={() => { setShowForm(false); setIsEditing(false); setIsGlobalOffer(false); setForm(initialForm); }}>
+          <div className="modal-panel p-6 w-full max-w-3xl" style={{ maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title mb-4">
+              {isEditing ? "Edit Offer" : isGlobalOffer ? "Create Sipstr (Global) Offer" : "Create Store Offer"}
+            </h3>
 
-                        {/* ↓ This is the updated part */}
-                        <td style={{ padding: "10px 14px", color: "#0b1220", fontSize: 13, lineHeight: "1.6em" }}>
-                            {(() => {
-                                const usedAt = u.usedAt ?? [];
-                                return usedAt.length > 0 ? (
-                                <ul style={{ margin: 0, paddingLeft: 18 }}>
-                                    {usedAt.map((t, i) => (
-                                    <li key={i} style={{ listStyleType: "disc" }}>
-                                        {formatDate(t)}
-                                    </li>
-                                    ))}
-                                </ul>
-                                ) : (
-                                "-"
-                                );
-                            })()}
-                            </td>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                  <input className="modal-input w-full" value={form.name ?? ""} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Store ID</label>
+                  {isGlobalOffer ? (
+                    <div className="px-3 py-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500">Global Offer — not store specific</div>
+                  ) : (
+                    <input type="number" className="modal-input w-full" value={form.storeId ?? (storeId ? Number(storeId) : "")} onChange={(e) => setForm((p) => ({ ...p, storeId: e.target.value ? Number(e.target.value) : undefined }))} />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Method</label>
+                  <select className="modal-input w-full" value={form.method} onChange={(e) => setForm((prev) => {
+                    const method = e.target.value;
+                    if (method === "COUPON") {
+                      return { ...prev, method, couponDetail: prev.couponDetail ?? ({ couponId: undefined, offerId: prev.offerId, couponCode: "", websiteDisplayMsg: "", maxUsagePerUser: 0, usabilityCount: 0, usabilityOptions: undefined } as any) };
+                    }
+                    return { ...prev, method };
+                  })}>
+                    <option value="COUPON">COUPON</option>
+                    <option value="VOUCHER">VOUCHER</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                  <select className="modal-input w-full" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as any }))}>
+                    <option value="FLAT">FLAT</option>
+                    <option value="PERCENTAGE">PERCENTAGE</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Discount</label>
+                  <input type="number" className="modal-input w-full" value={form.discount ?? ""} onChange={(e) => setForm((p) => ({ ...p, discount: Number(e.target.value) }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Allowed Max Discount</label>
+                  <input type="number" className="modal-input w-full" value={form.allowedMaxDiscount ?? ""} onChange={(e) => setForm((p) => ({ ...p, allowedMaxDiscount: Number(e.target.value) }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Min Spend Amount</label>
+                  <input type="number" className="modal-input w-full" value={form.minSpendAmount ?? ""} onChange={(e) => setForm((p) => ({ ...p, minSpendAmount: Number(e.target.value) }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Max Total Usage</label>
+                  <input type="number" className="modal-input w-full" value={form.maxTotalUsage ?? ""} onChange={(e) => setForm((p) => ({ ...p, maxTotalUsage: Number(e.target.value) }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Required Voucher Count</label>
+                  <input type="number" className="modal-input w-full" value={form.requiredVoucherCount ?? ""} onChange={(e) => setForm((p) => ({ ...p, requiredVoucherCount: Number(e.target.value) }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <input className="modal-input w-full" value={form.description ?? ""} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date & Time</label>
+                  <input type="datetime-local" className="modal-input w-full" value={form.startDateTime ?? ""} onChange={(e) => setForm((p) => ({ ...p, startDateTime: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date & Time</label>
+                  <input type="datetime-local" className="modal-input w-full" value={form.endDateTime ?? ""} onChange={(e) => setForm((p) => ({ ...p, endDateTime: e.target.value }))} />
+                </div>
+              </div>
 
-                        </tr>
-                    ))}
-                    </tbody>
-
-            </table>
-          </div>
-            ) : (
-            <div style={{ padding: 28, textAlign: "center", color: "#475569" }}>
-                <div style={{ fontSize: 16, marginBottom: 8 }}>No users have used this offer yet.</div>
-                <div style={{ fontSize: 13 }}>Once a user redeems the coupon, their details will appear here.</div>
+              {/* Coupon Details */}
+              {form.method === "COUPON" && (
+                <div className="border border-gray-200 rounded-lg p-4 mt-3">
+                  <h4 className="text-sm font-semibold text-gray-800 mb-3">Coupon Details</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Coupon Code</label>
+                      <input className="modal-input w-full" value={(form.couponDetail as any)?.couponCode ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), couponCode: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Website Display Message</label>
+                      <input className="modal-input w-full" value={(form.couponDetail as any)?.websiteDisplayMsg ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), websiteDisplayMsg: e.target.value } }))} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Max Usage Per User</label>
+                      <input type="number" className="modal-input w-full" value={(form.couponDetail as any)?.maxUsagePerUser ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), maxUsagePerUser: Number(e.target.value) } }))} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Usability Count</label>
+                      <input type="number" className="modal-input w-full" value={(form.couponDetail as any)?.usabilityCount ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), usabilityCount: Number(e.target.value) } }))} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Usability Option</label>
+                      <select className="modal-input w-full" value={(form.couponDetail as any)?.usabilityOptions ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, couponDetail: { ...(prev.couponDetail ?? {}), usabilityOptions: e.target.value as any } }))}>
+                        <option value="">Select</option>
+                        <option value="MONTH">MONTH</option>
+                        <option value="QUARTER">QUARTER</option>
+                        <option value="HALF_YEAR">HALF_YEAR</option>
+                        <option value="YEAR">YEAR</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+
+            <div className="modal-footer">
+              <button className="modal-btn-secondary" onClick={() => { setShowForm(false); setIsEditing(false); setIsGlobalOffer(false); setForm(initialForm); }}>Cancel</button>
+              <button className="modal-btn-primary" onClick={handleSubmit}>{isEditing ? "Update Offer" : "Create Offer"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Consumption Modal */}
+      {showConsumption && (
+        <div className="modal-overlay" onClick={() => setShowConsumption(false)}>
+          <div className="modal-panel p-6 w-full max-w-3xl" style={{ maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="modal-title">Consumption History</h3>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">Offer: {consumption?.offerId ?? "-"}</span>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-700">Code: {consumption?.couponCode ?? "-"}</span>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Store: {consumption?.storeId ?? "-"}</span>
+                </div>
+              </div>
+              <button onClick={() => setShowConsumption(false)} className="modal-btn-secondary">Close</button>
+            </div>
+
+            {consumptionLoading ? (
+              <div className="py-12 text-center text-gray-500">Loading...</div>
+            ) : consumptionUsers.length > 0 ? (
+              <>
+                <div className="table-shell">
+                  <table className="table-base">
+                    <thead>
+                      <tr className="table-head-row">
+                        <th className="table-head-cell">User ID</th>
+                        <th className="table-head-cell">UUID</th>
+                        <th className="table-head-cell">Name</th>
+                        <th className="table-head-cell">Phone</th>
+                        <th className="table-head-cell">Used At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedConsumptionUsers.map((u, idx) => (
+                        <tr key={u.uuid ?? idx} className="table-row table-row-hover">
+                          <td className="table-cell">{u.id ?? "-"}</td>
+                          <td className="table-cell text-xs max-w-[180px] truncate">{String(u.uuid ?? "-")}</td>
+                          <td className="table-cell">{u.fullName ?? "-"}</td>
+                          <td className="table-cell">{u.mobileNumber ?? "-"}</td>
+                          <td className="table-cell text-xs">
+                            {(u.usedAt ?? []).length > 0 ? (
+                              <ul className="list-disc pl-4 space-y-0.5">
+                                {(u.usedAt ?? []).map((t: string, i: number) => <li key={i}>{formatDate(t)}</li>)}
+                              </ul>
+                            ) : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3">
+                  <PaginationControls
+                    page={consumptionPage}
+                    totalPages={consumptionTotalPages}
+                    totalItems={consumptionUsers.length}
+                    pageSize={consumptionPageSize}
+                    onPageChange={setConsumptionPage}
+                    onPageSizeChange={setConsumptionPageSize}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="py-12 text-center text-gray-500">
+                <p className="text-base mb-1">No users have used this offer yet.</p>
+                <p className="text-sm text-gray-400">Once a user redeems the coupon, their details will appear here.</p>
+              </div>
             )}
+          </div>
         </div>
-        </div>
-    </div>
-    )}
-
-      {/* Simple centered alert popup */}
-{alertMessage && (
-  <div
-    style={{
-      position: "fixed",
-      top: "50%",
-      left: "50%",
-      transform: "translate(-50%, -50%)",
-      background: "white",
-      padding: "20px 28px",
-      borderRadius: 10,
-      boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
-      zIndex: 10000,
-      textAlign: "center",
-      minWidth: 300,
-    }}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div style={{ marginBottom: 12, color: "#222", fontSize: 15 }}>{alertMessage}</div>
-    <div style={{ display: "flex", justifyContent: "center" }}>
-      <button
-        onClick={() => setAlertMessage(null)}
-        style={{
-          padding: "8px 16px",
-          borderRadius: 6,
-          border: "none",
-          background: "#2563eb",
-          color: "white",
-          cursor: "pointer",
-        }}
-      >
-        OK
-      </button>
-    </div>
-  </div>
-)}
-
+      )}
     </div>
   );
 }
-
-/* ---------- styles ---------- */
-const primaryBtnStyle: React.CSSProperties = {
-  padding: "8px 14px",
-  backgroundColor: "#FF6600",
-  color: "white",
-  border: "none",
-  borderRadius: 6,
-  cursor: "pointer",
-};
-
-const actionBtnStyle: React.CSSProperties = {
-  padding: "6px 10px",
-  borderRadius: 6,
-  border: "1px solid #ddd",
-  cursor: "pointer",
-  background: "white",
-};
-
-const modalOverlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  backgroundColor: "rgba(2,6,23,0.45)", // slightly darker backdrop
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 9999,
-  padding: 20,
-};
-
-const modalStyle: React.CSSProperties = {
-  background: "linear-gradient(180deg, #ffffff, #fbfbfd)",
-  padding: 18,
-  borderRadius: 12,
-  width: "min(920px, 96vw)",
-  maxWidth: "920px",
-  maxHeight: "86vh",
-  overflow: "hidden",
-  boxShadow: "0 12px 40px rgba(2,6,23,0.28)",
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-};
-const labelStyle: React.CSSProperties = { display: "block", fontSize: 13, marginBottom: 6, fontWeight: 600 };
-const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", border: "1px solid #ddd", borderRadius: 6, boxSizing: "border-box" };

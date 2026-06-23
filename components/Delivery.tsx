@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { deliveryZoneService } from "../services/deliveryZone";
 import { apiService } from "../services/apiService";
 import type { DeliveryZone, CreateDeliveryZoneRequest } from "../services/types";
 import MapPreviewGoogle from "../googlemap/MapPreviewGoogle";
+import { useJsApiLoader, GoogleMap, Polygon as GPolygon, DrawingManager } from "@react-google-maps/api";
+
+type CoordinateInputMode = "manual" | "kml" | "draw";
 
 /* ----------------- parseKmlToPlacemarks (unchanged) ----------------- */
 function parseKmlToPlacemarks(kmlText: string) {
@@ -273,6 +276,9 @@ export default function DeliveryZonesAdmin() {
   const [parsingError, setParsingError] = useState<string | null>(null);
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
   const [isAddHover, setIsAddHover] = useState(false);
+  const [coordinateMode, setCoordinateMode] = useState<CoordinateInputMode>("manual");
+  const [drawnCoords, setDrawnCoords] = useState<[number, number][]>([]);
+  const drawingPolygonRef = useRef<google.maps.Polygon | null>(null);
 
   // editing states
   const [editingPlacemarkIndex, setEditingPlacemarkIndex] = useState<number | null>(null);
@@ -777,25 +783,27 @@ export default function DeliveryZonesAdmin() {
             zIndex: 60,
           }}
         >
-          <div style={{ width: 680, maxHeight: "85vh", overflowY: "auto", background: "#fff", borderRadius: 10, padding: 18 }}>
+          <div style={{ width: 780, maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: 12, padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0 }}>{editingPlacemarkIndex != null ? "Review Placemark" : parsedPlacemarks.length ? "Imported Placemarks" : editingZoneId != null ? "Edit Zone" : "Add Zone"}</h3>
+              <h3 style={{ margin: 0 }}>{editingPlacemarkIndex != null ? "Review Placemark" : parsedPlacemarks.length ? "Imported Placemarks" : editingZoneId != null ? "Edit Zone" : "Add Delivery Zone"}</h3>
               <button
                 onClick={() => {
                   setShowModal(false);
                   setEditingPlacemarkIndex(null);
                   setEditingZoneId(null);
+                  setCoordinateMode("manual");
+                  setDrawnCoords([]);
+                  if (drawingPolygonRef.current) { drawingPolygonRef.current.setMap(null); drawingPolygonRef.current = null; }
                 }}
-                style={{ border: "none", background: "transparent", cursor: "pointer" }}
+                style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 18 }}
               >
-                Close
+                ✕
               </button>
             </div>
 
-            {/* Compact imported list */}
+            {/* Compact imported list (from KML bulk) */}
             {parsedPlacemarks.length > 0 && editingPlacemarkIndex == null && (
               <div style={{ marginTop: 12, position: "relative" }}>
-                {/* card that holds the list; add bottom padding so absolute buttons don't overlap content */}
                 <div
                   style={{
                     padding: 14,
@@ -805,12 +813,11 @@ export default function DeliveryZonesAdmin() {
                     boxShadow: "0 4px 10px rgba(12,18,28,0.03)",
                     maxHeight: 420,
                     overflowY: "auto",
-                    paddingBottom: 64, // leave space for bottom-right buttons
+                    paddingBottom: 64,
                   }}
                 >
                   <div style={{ marginBottom: 12, color: "#222", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <strong style={{ fontSize: 15 }}>Imported Placemarks ({parsedPlacemarks.length})</strong>
-                    {/* small helper text */}
                     <span style={{ fontSize: 12, color: "#888" }}>Review or import</span>
                   </div>
 
@@ -833,10 +840,7 @@ export default function DeliveryZonesAdmin() {
                         >
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 700, fontSize: 15, color: "#0b2540" }}>{pd.zoneName ?? pm.name ?? `Placemark ${idx + 1}`}</div>
-
-                            {/* CLEANED KEY/VALUE CHIPS */}
                             <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                              {/* chip factory */}
                               {[
                                 { k: "baseDeliveryFee", v: pd.baseDeliveryFee },
                                 { k: "perMileFee", v: pd.perMileFee },
@@ -853,10 +857,8 @@ export default function DeliveryZonesAdmin() {
                                     background: "#ffffff",
                                     border: "1px solid #eef3f7",
                                     borderRadius: 999,
-                                    boxShadow: "0 1px 0 rgba(16,24,40,0.02)",
                                     fontSize: 13,
                                     color: "#334155",
-                                    minHeight: 30,
                                   }}
                                 >
                                   <strong style={{ fontWeight: 600, fontSize: 12, color: "#0b2540" }}>{labelForKey(item.k)}:</strong>
@@ -866,34 +868,11 @@ export default function DeliveryZonesAdmin() {
                             </div>
                           </div>
 
-                          {/* action buttons for each placemark */}
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            <button
-                              onClick={() => reviewPlacemark(pm, idx)}
-                              style={{
-                                padding: "6px 10px",
-                                borderRadius: 8,
-                                background: "#eef6ff",
-                                border: "1px solid #e6f0ff",
-                                cursor: "pointer",
-                                fontWeight: 600,
-                              }}
-                            >
+                            <button onClick={() => reviewPlacemark(pm, idx)} style={{ padding: "6px 10px", borderRadius: 8, background: "#eef6ff", border: "1px solid #e6f0ff", cursor: "pointer", fontWeight: 600 }}>
                               Review
                             </button>
-
-                            <button
-                              onClick={() => createFromPlacemark(pm, idx)}
-                              disabled={uploadingIndex === idx}
-                              style={{
-                                padding: "6px 10px",
-                                borderRadius: 8,
-                                background: "#e6ffef",
-                                border: "1px solid #dff5e8",
-                                cursor: uploadingIndex === idx ? "not-allowed" : "pointer",
-                                fontWeight: 600,
-                              }}
-                            >
+                            <button onClick={() => createFromPlacemark(pm, idx)} disabled={uploadingIndex === idx} style={{ padding: "6px 10px", borderRadius: 8, background: "#e6ffef", border: "1px solid #dff5e8", cursor: uploadingIndex === idx ? "not-allowed" : "pointer", fontWeight: 600 }}>
                               {uploadingIndex === idx ? "Creating..." : "Create"}
                             </button>
                           </div>
@@ -903,48 +882,18 @@ export default function DeliveryZonesAdmin() {
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    position: "absolute",
-                    right: 8,
-                    bottom: 4,
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                  }}
-                >
-                  <button
-                    onClick={() => setParsedPlacemarks([])}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      background: "#fff",
-                      border: "1px solid #e6eef7",
-                      cursor: "pointer",
-                    }}
-                  >
+                <div style={{ position: "absolute", right: 8, bottom: 4, display: "flex", gap: 8 }}>
+                  <button onClick={() => setParsedPlacemarks([])} style={{ padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #e6eef7", cursor: "pointer" }}>
                     Clear
                   </button>
-
-                  <button
-                    onClick={createAllPlacemarks}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      background: "#FF6600",
-                      color: "#fff",
-                      border: "none",
-                      cursor: "pointer",
-                      boxShadow: "0 6px 18px rgba(255,102,0,0.14)",
-                    }}
-                  >
+                  <button onClick={createAllPlacemarks} style={{ padding: "8px 12px", borderRadius: 8, background: "#FF6600", color: "#fff", border: "none", cursor: "pointer" }}>
                     Create All
                   </button>
                 </div>
               </div>
             )}
 
+            {/* Zone form (add/edit/review) */}
             {(editingPlacemarkIndex != null || parsedPlacemarks.length === 0 || editingZoneId != null) && (
               <>
                 {editingPlacemarkIndex != null && parsedPlacemarks[editingPlacemarkIndex] && (
@@ -954,95 +903,193 @@ export default function DeliveryZonesAdmin() {
                   </div>
                 )}
 
+                {/* Zone fields */}
                 <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   <label style={{ display: "flex", flexDirection: "column" }}>
                     Zone name
                     <input value={form.zoneName} onChange={(e) => setForm({ ...form, zoneName: e.target.value })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
                   </label>
-
                   <label style={{ display: "flex", flexDirection: "column" }}>
                     Base fee
                     <input type="number" value={form.baseDeliveryFee} onChange={(e) => setForm({ ...form, baseDeliveryFee: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
                   </label>
-
                   <label style={{ display: "flex", flexDirection: "column" }}>
                     Per mile
                     <input type="number" value={form.perMileFee} onChange={(e) => setForm({ ...form, perMileFee: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
                   </label>
-
                   <label style={{ display: "flex", flexDirection: "column" }}>
                     Min order
                     <input type="number" value={form.minOrderAmount} onChange={(e) => setForm({ ...form, minOrderAmount: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
                   </label>
-
                   <label style={{ display: "flex", flexDirection: "column" }}>
                     Estimated prep time (mins)
                     <input type="number" value={form.estimatedPreparationTime} onChange={(e) => setForm({ ...form, estimatedPreparationTime: Number(e.target.value) })} style={{ padding: 10, borderRadius: 6, border: "1px solid #eee" }} />
                   </label>
-
                   <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <input type="checkbox" checked={form.restricted} onChange={(e) => setForm({ ...form, restricted: e.target.checked })} />
                     <span>Restricted</span>
                   </label>
-
                   <label style={{ display: "flex", flexDirection: "column" }}>
                     Store UUID (auto)
                     <input value={form.storeUuid || selectedStoreUuid || ""} readOnly style={{ padding: 10, borderRadius: 6, border: "1px solid #eee", background: "#fafafa" }} />
                   </label>
                 </div>
 
-                {/* coordinates */}
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontWeight: 600 }}>Coordinates</div>
-                  <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-                    {form.coordinates.map((coord, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <input
-                          type="number"
-                          value={coord[0]}
-                          onChange={(e) => {
-                            const copy = [...form.coordinates];
-                            copy[idx] = [Number(e.target.value), copy[idx][1]];
-                            setForm({ ...form, coordinates: copy });
-                          }}
-                          style={{ padding: 8, width: 140, borderRadius: 6, border: "1px solid #eee" }}
-                        />
-                        <input
-                          type="number"
-                          value={coord[1]}
-                          onChange={(e) => {
-                            const copy = [...form.coordinates];
-                            copy[idx] = [copy[idx][0], Number(e.target.value)];
-                            setForm({ ...form, coordinates: copy });
-                          }}
-                          style={{ padding: 8, width: 140, borderRadius: 6, border: "1px solid #eee" }}
-                        />
-                        <button
-                          onClick={() => {
-                            setForm({ ...form, coordinates: form.coordinates.filter((_, i) => i !== idx) });
-                          }}
-                          style={{ padding: 8, borderRadius: 6, background: "#ffefef", border: "none", cursor: "pointer" }}
-                        >
-                          Remove
-                        </button>
-                      </div>
+                {/* Coordinate Input Tabs */}
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 10 }}>Coordinates</div>
+                  <div style={{ display: "flex", gap: 0, borderBottom: "2px solid #eee", marginBottom: 12 }}>
+                    {([
+                      { key: "manual", label: "Manual Entry" },
+                      { key: "kml", label: "Upload KML" },
+                      { key: "draw", label: "Draw on Map" },
+                    ] as { key: CoordinateInputMode; label: string }[]).map((tab) => (
+                      <button
+                        key={tab.key}
+                        onClick={() => setCoordinateMode(tab.key)}
+                        style={{
+                          padding: "10px 16px",
+                          border: "none",
+                          borderBottom: coordinateMode === tab.key ? "2px solid #FF6600" : "2px solid transparent",
+                          background: "transparent",
+                          fontWeight: coordinateMode === tab.key ? 700 : 400,
+                          color: coordinateMode === tab.key ? "#FF6600" : "#666",
+                          cursor: "pointer",
+                          marginBottom: -2,
+                          fontSize: 14,
+                        }}
+                      >
+                        {tab.label}
+                      </button>
                     ))}
                   </div>
-                  <div style={{ marginTop: 8 }}>
-                    <button onClick={() => setForm({ ...form, coordinates: [...form.coordinates, [0, 0]] })} style={{ padding: 10, borderRadius: 8, background: "#eef6ff", border: "none", cursor: "pointer" }}>
-                      Add coordinate
-                    </button>
-                  </div>
+
+                  {/* Manual coordinate entry */}
+                  {coordinateMode === "manual" && (
+                    <div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 200, overflowY: "auto" }}>
+                        {form.coordinates.map((coord, idx) => (
+                          <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontSize: 12, color: "#888", width: 24 }}>{idx + 1}.</span>
+                            <input
+                              type="number"
+                              step="any"
+                              placeholder="Latitude"
+                              value={coord[0]}
+                              onChange={(e) => {
+                                const copy = [...form.coordinates];
+                                copy[idx] = [Number(e.target.value), copy[idx][1]];
+                                setForm({ ...form, coordinates: copy });
+                              }}
+                              style={{ padding: 8, width: 150, borderRadius: 6, border: "1px solid #eee" }}
+                            />
+                            <input
+                              type="number"
+                              step="any"
+                              placeholder="Longitude"
+                              value={coord[1]}
+                              onChange={(e) => {
+                                const copy = [...form.coordinates];
+                                copy[idx] = [copy[idx][0], Number(e.target.value)];
+                                setForm({ ...form, coordinates: copy });
+                              }}
+                              style={{ padding: 8, width: 150, borderRadius: 6, border: "1px solid #eee" }}
+                            />
+                            <button
+                              onClick={() => setForm({ ...form, coordinates: form.coordinates.filter((_, i) => i !== idx) })}
+                              style={{ padding: "6px 10px", borderRadius: 6, background: "#ffefef", border: "none", cursor: "pointer", fontSize: 12 }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                        <button onClick={() => setForm({ ...form, coordinates: [...form.coordinates, [0, 0]] })} style={{ padding: "8px 12px", borderRadius: 8, background: "#eef6ff", border: "none", cursor: "pointer", fontSize: 13 }}>
+                          + Add Point
+                        </button>
+                        <span style={{ fontSize: 12, color: "#888", alignSelf: "center" }}>{form.coordinates.length} point(s)</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* KML Upload */}
+                  {coordinateMode === "kml" && (
+                    <div>
+                      <div style={{ border: "2px dashed #ddd", borderRadius: 10, padding: 24, textAlign: "center", background: "#fafcfe" }}>
+                        <div style={{ fontSize: 14, color: "#555", marginBottom: 8 }}>Upload a .kml file to extract polygon coordinates</div>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 16px", background: "#FF6600", color: "#fff", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+                          <input
+                            type="file"
+                            accept=".kml"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                try {
+                                  const text = reader.result as string;
+                                  const parsed = parseKmlToPlacemarks(text);
+                                  if (parsed.length === 0) {
+                                    showAlert("No placemarks found in KML file");
+                                    return;
+                                  }
+                                  if (parsed.length === 1) {
+                                    // Single zone - directly fill coords
+                                    const pm = parsed[0];
+                                    if (pm.coordinates.length > 0) {
+                                      setForm((f) => ({ ...f, coordinates: pm.coordinates as [number, number][] }));
+                                      // Also fill zone name from placemark if empty
+                                      if (!form.zoneName && (pm.parsedDescription?.zoneName || pm.name)) {
+                                        setForm((f) => ({ ...f, zoneName: pm.parsedDescription?.zoneName ?? pm.name }));
+                                      }
+                                      showAlert(`Loaded ${pm.coordinates.length} coordinate points from KML`);
+                                    }
+                                  } else {
+                                    // Multiple placemarks - switch to bulk import flow
+                                    setParsedPlacemarks(parsed);
+                                    setCoordinateMode("manual");
+                                  }
+                                } catch (err) {
+                                  showAlert("Failed to parse KML file");
+                                }
+                              };
+                              reader.readAsText(file);
+                              e.target.value = "";
+                            }}
+                            style={{ display: "none" }}
+                          />
+                          Choose KML File
+                        </label>
+                        <div style={{ marginTop: 12, fontSize: 12, color: "#888" }}>
+                          If the KML has multiple placemarks, you&apos;ll see a bulk import list.
+                        </div>
+                      </div>
+                      {form.coordinates.length > 1 && (
+                        <div style={{ marginTop: 10, fontSize: 13, color: "#25a18e", fontWeight: 600 }}>
+                          ✓ {form.coordinates.length} coordinates loaded from KML
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Draw on Map */}
+                  {coordinateMode === "draw" && (
+                    <DrawOnMapPanel
+                      existingCoords={form.coordinates}
+                      onCoordsChange={(coords) => {
+                        setForm({ ...form, coordinates: coords });
+                        setDrawnCoords(coords);
+                      }}
+                      drawingPolygonRef={drawingPolygonRef}
+                    />
+                  )}
                 </div>
 
-                <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                {/* Actions */}
+                <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   {editingPlacemarkIndex != null && (
-                    <button
-                      onClick={() => {
-                        setEditingPlacemarkIndex(null); /* keep parsed list */
-                      }}
-                      style={{ padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #eee" }}
-                    >
+                    <button onClick={() => setEditingPlacemarkIndex(null)} style={{ padding: "8px 14px", borderRadius: 8, background: "#fff", border: "1px solid #eee", cursor: "pointer" }}>
                       Back
                     </button>
                   )}
@@ -1051,13 +1098,16 @@ export default function DeliveryZonesAdmin() {
                       setShowModal(false);
                       setEditingPlacemarkIndex(null);
                       setEditingZoneId(null);
+                      setCoordinateMode("manual");
+                      setDrawnCoords([]);
+                      if (drawingPolygonRef.current) { drawingPolygonRef.current.setMap(null); drawingPolygonRef.current = null; }
                     }}
-                    style={{ padding: "8px 12px", borderRadius: 8, background: "#fff", border: "1px solid #eee" }}
+                    style={{ padding: "8px 14px", borderRadius: 8, background: "#fff", border: "1px solid #eee", cursor: "pointer" }}
                   >
                     Cancel
                   </button>
-                  <button onClick={handleSubmit} style={{ padding: "8px 12px", borderRadius: 8, background: "#FF6600", color: "#fff", border: "none" }}>
-                    {editingZoneId != null ? "Update" : "Save"}
+                  <button onClick={handleSubmit} style={{ padding: "8px 14px", borderRadius: 8, background: "#FF6600", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                    {editingZoneId != null ? "Update" : "Save Zone"}
                   </button>
                 </div>
               </>
@@ -1067,6 +1117,131 @@ export default function DeliveryZonesAdmin() {
       )}
 
       <AlertDialog alert={customAlert} onClose={closeAlert} />
+    </div>
+  );
+}
+
+
+/* ===================== Draw on Map Panel ===================== */
+const GOOGLE_MAPS_LIBRARIES: ("drawing" | "geometry" | "places")[] = ["drawing", "geometry", "places"];
+
+function DrawOnMapPanel({
+  existingCoords,
+  onCoordsChange,
+  drawingPolygonRef,
+}: {
+  existingCoords: [number, number][];
+  onCoordsChange: (coords: [number, number][]) => void;
+  drawingPolygonRef: React.MutableRefObject<google.maps.Polygon | null>;
+}) {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey: apiKey,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+  });
+
+  const [mapCenter] = useState<{ lat: number; lng: number }>(() => {
+    if (existingCoords.length > 0 && existingCoords[0][0] !== 0) {
+      return { lat: existingCoords[0][0], lng: existingCoords[0][1] };
+    }
+    return { lat: 37.7749, lng: -122.4194 }; // default San Francisco
+  });
+
+  const handlePolygonComplete = useCallback(
+    (polygon: google.maps.Polygon) => {
+      // Remove previous drawn polygon
+      if (drawingPolygonRef.current) {
+        drawingPolygonRef.current.setMap(null);
+      }
+      drawingPolygonRef.current = polygon;
+
+      const path = polygon.getPath();
+      const coords: [number, number][] = [];
+      for (let i = 0; i < path.getLength(); i++) {
+        const pt = path.getAt(i);
+        coords.push([pt.lat(), pt.lng()]);
+      }
+      // Close the polygon (first point = last point)
+      if (coords.length > 0) {
+        coords.push([coords[0][0], coords[0][1]]);
+      }
+      onCoordsChange(coords);
+    },
+    [onCoordsChange, drawingPolygonRef]
+  );
+
+  if (!isLoaded) {
+    return <div style={{ padding: 20, textAlign: "center", color: "#888" }}>Loading map…</div>;
+  }
+
+  const existingPath = existingCoords.length > 1 && existingCoords[0][0] !== 0
+    ? existingCoords.map((c) => ({ lat: c[0], lng: c[1] }))
+    : null;
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "#555", marginBottom: 8 }}>
+        Draw a polygon on the map to define the delivery zone boundary. Click points to form the shape, then double-click or click the first point to close.
+      </div>
+      <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #eee", height: 350 }}>
+        <GoogleMap
+          mapContainerStyle={{ width: "100%", height: "100%" }}
+          center={mapCenter}
+          zoom={13}
+          options={{ streetViewControl: false, mapTypeControl: false, fullscreenControl: true }}
+        >
+          <DrawingManager
+            options={{
+              drawingControl: true,
+              drawingControlOptions: {
+                position: (window as any).google?.maps?.ControlPosition?.TOP_CENTER,
+                drawingModes: [(window as any).google?.maps?.drawing?.OverlayType?.POLYGON],
+              },
+              polygonOptions: {
+                fillColor: "#FF6600",
+                fillOpacity: 0.15,
+                strokeColor: "#FF6600",
+                strokeOpacity: 0.8,
+                strokeWeight: 2,
+                editable: true,
+                draggable: true,
+              },
+            }}
+            onPolygonComplete={handlePolygonComplete}
+          />
+
+          {/* Show existing polygon if coordinates are already set */}
+          {existingPath && (
+            <GPolygon
+              paths={existingPath}
+              options={{
+                fillColor: "#25a18e",
+                fillOpacity: 0.12,
+                strokeColor: "#25a18e",
+                strokeOpacity: 0.7,
+                strokeWeight: 2,
+              }}
+            />
+          )}
+        </GoogleMap>
+      </div>
+
+      {existingCoords.length > 1 && existingCoords[0][0] !== 0 && (
+        <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 13, color: "#25a18e", fontWeight: 600 }}>
+            ✓ {existingCoords.length} points defined
+          </span>
+          <button
+            onClick={() => {
+              onCoordsChange([[0, 0]]);
+              if (drawingPolygonRef.current) { drawingPolygonRef.current.setMap(null); drawingPolygonRef.current = null; }
+            }}
+            style={{ fontSize: 12, color: "#e63946", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+          >
+            Clear drawn polygon
+          </button>
+        </div>
+      )}
     </div>
   );
 }

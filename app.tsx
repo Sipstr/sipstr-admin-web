@@ -21,6 +21,13 @@ const handleLogin = useCallback(async (email: string, password: string) => {
   setLoading(true)
   setError(null)
 
+  // Dummy credentials for local testing (bypass backend)
+  if (email === "admin" && password === "admin") {
+    setSession({ id: "local-dev", email: "admin@sipstr.com", role: "ADMIN", token: "dummy-token" })
+    setLoading(false)
+    return
+  }
+
   try {
     const response = await apiService.login(email, password)
     setSession(response)

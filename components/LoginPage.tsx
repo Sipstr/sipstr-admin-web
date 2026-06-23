@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
+import Image from "next/image"
 import { Eye, EyeOff, Lock, Mail } from "lucide-react"
 
 interface LoginPageProps {
@@ -27,7 +28,7 @@ export function LoginPage({ onLogin, loading, error }: LoginPageProps) {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
           {/* Logo */}
           <div className="flex justify-center mb-6">
-            <img src="/Sipstr.PNG" alt="Sipstr" className="h-14 w-auto object-contain" />
+            <Image src="/Sipstr.PNG" alt="Sipstr" width={160} height={56} className="h-14 w-auto object-contain" priority />
           </div>
 
           {/* Title */}
@@ -48,7 +49,7 @@ export function LoginPage({ onLogin, loading, error }: LoginPageProps) {
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
                 />
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@sipstr.com"

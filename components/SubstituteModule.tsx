@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { apiService } from "@/services/apiService";
 import type {
   RecentOrder,
@@ -664,7 +665,14 @@ export function SubstituteModule() {
               <div key={`${inventoryModalStoreUuid ?? "global"}-prod-${g.productId ?? gIndex}`} className="border p-3 rounded flex items-center gap-3">
                 <div className="w-14 h-14 flex-shrink-0">
                   {g.variants?.[0]?.thumbnailImageUrl ? (
-                    <img src={g.variants[0].thumbnailImageUrl} alt={g.productName} className="w-14 h-14 object-cover rounded" />
+                    <Image
+                      src={g.variants[0].thumbnailImageUrl}
+                      alt={g.productName}
+                      width={56}
+                      height={56}
+                      className="w-14 h-14 object-cover rounded"
+                      unoptimized
+                    />
                   ) : (
                     <div className="w-14 h-14 bg-gray-100 flex items-center justify-center text-xs">IMG</div>
                   )}

@@ -3,11 +3,18 @@ import React, { useState, useMemo } from "react";
 import { formatISO, startOfDay, endOfDay } from "date-fns";
 import type { AuditLog } from "../services/types";
 import { apiService } from "../services/apiService";
+import { DataTable, ColumnDef, DataTableAction } from "./DataTable";
+
+const EXCLUDED_ENDPOINTS = [
+  "/api/audit-logs/me",
+  "/api/audit-logs/endpoint",
+  "/api/audit-logs/date-range",
+  "/api/audit-logs/user/",
+];
 
 export function AuditLogsModule() {
   const [fromDate, setFromDate] = useState(() => formatISO(startOfDay(new Date())).slice(0, 19));
   const [toDate, setToDate] = useState(() => formatISO(endOfDay(new Date())).slice(0, 19));
-  const [query, setQuery] = useState("");
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,154 +56,106 @@ export function AuditLogsModule() {
     }
   };
 
-  const excludedEndpoints = [
-    "/api/audit-logs/me",
-    "/api/audit-logs/endpoint",
-    "/api/audit-logs/date-range",
-    "/api/audit-logs/user/"
-  ];
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  const visibleLogs = useMemo(() => {
     const isExcluded = (endpoint?: string) => {
       if (!endpoint) return false;
       const ep = endpoint.toString().toLowerCase();
-      if (excludedEndpoints.includes(ep) || ep.startsWith("/api/audit-logs/user/")) return true;
+      if (EXCLUDED_ENDPOINTS.includes(ep) || ep.startsWith("/api/audit-logs/user/")) return true;
       return false;
     };
-    const visibleLogs = logs.filter((l) => !isExcluded(l.endpoint));
-    if (!q) return visibleLogs;
-
-    return visibleLogs.filter((l) => {
-      const rb = (typeof l.requestBody === "string" ? l.requestBody : JSON.stringify(l.requestBody || "")).toLowerCase();
-      const resp = (typeof l.responseBody === "string" ? l.responseBody : JSON.stringify(l.responseBody || "")).toLowerCase();
-      const endpoint = (l.endpoint || "").toLowerCase();
-      const user = (l.userEmail || "").toLowerCase();
-      return rb.includes(q) || resp.includes(q) || endpoint.includes(q) || user.includes(q);
-    });
-  }, [logs, query]);
+    return logs.filter((l) => !isExcluded(l.endpoint));
+  }, [logs]);
 
   const toggle = (id: number) => setExpanded((s) => ({ ...s, [id]: !s[id] }));
 
+  const AUDIT_COLUMNS: ColumnDef<AuditLog>[] = [
+    { key: "createdAt", label: "Timestamp", getValue: (l) => l.createdAt ? new Date(l.createdAt).toLocaleString() : "-" },
+    { key: "endpoint", label: "Endpoint", getValue: (l) => l.endpoint ?? "-" },
+    { key: "httpMethod", label: "Method", getValue: (l) => l.httpMethod ?? "-", render: (val) => <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700">{val}</span> },
+    { key: "statusCode", label: "Status", getValue: (l) => l.statusCode ?? "-", render: (val) => { const n = Number(val); const color = n >= 400 ? "bg-red-100 text-red-700" : n >= 300 ? "bg-yellow-100 text-yellow-700" : "bg-emerald-100 text-emerald-700"; return <span className={`px-2 py-0.5 rounded text-xs font-semibold ${color}`}>{val}</span>; } },
+    { key: "userEmail", label: "User Email", getValue: (l) => l.userEmail ?? "-" },
+  ];
+
+  const actions: DataTableAction<AuditLog>[] = [
+    { label: "View", onClick: (l) => toggle(l.id) },
+  ];
+
   return (
-    <div style={{ padding: 16 }}>
-      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Audit Logs</h3>
+    <div className="page-container-sidebar page-content space-y-5">
+      <div className="page-header">
+        <h2 className="page-title">Audit Logs</h2>
+        <p className="page-subtitle">View API audit trails by date range.</p>
+      </div>
 
-      {/* Filters Section */}
-      <div style={{ 
-        position: "sticky", 
-        top: 0, 
-        zIndex: 20, 
-        background: "rgb(255,255,255)", 
-        padding: 12, 
-        borderBottom: "1px solid #ddd", 
-        marginTop: 12, 
-        display: "flex", 
-        gap: 12, 
-        flexWrap: "wrap" 
-      }}>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <label style={{ fontSize: 12, color: "#666" }}>From</label>
-          <input
-            type="datetime-local"
-            value={fromDate.slice(0, 19)}
-            onChange={(e) => setFromDate(e.target.value)}
-            style={{ padding: 8, borderRadius: 4, border: "1px solid #ddd" }}
-          />
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <label style={{ fontSize: 12, color: "#666" }}>To</label>
-          <input
-            type="datetime-local"
-            value={toDate.slice(0, 19)}
-            onChange={(e) => setToDate(e.target.value)}
-            style={{ padding: 8, borderRadius: 4, border: "1px solid #ddd" }}
-          />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "flex-end" }}>
-          <button onClick={fetchRange} style={{ padding: "8px 16px", background: "#FF6600", color: "#fff", border: "none", borderRadius: 6 }}>
+      {/* Date Range Filters */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <div className="flex flex-col md:flex-row gap-3 md:items-end">
+          <div className="flex flex-col">
+            <label className="text-xs font-medium text-gray-600 mb-1">From</label>
+            <input
+              type="datetime-local"
+              value={fromDate.slice(0, 19)}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="filter-input"
+            />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs font-medium text-gray-600 mb-1">To</label>
+            <input
+              type="datetime-local"
+              value={toDate.slice(0, 19)}
+              onChange={(e) => setToDate(e.target.value)}
+              className="filter-input"
+            />
+          </div>
+          <button onClick={fetchRange} className="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 text-white hover:bg-orange-600 transition-colors h-10">
             Fetch
           </button>
         </div>
-
-        <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", minWidth: 260 }}>
-          <label style={{ fontSize: 12, color: "#666" }}>Search</label>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ padding: 8, borderRadius: 4, border: "1px solid #123456" }}
-          />
-        </div>
       </div>
 
-      {/* Table */}
-      {loading && <div>Loading...</div>}
-      {error && <div style={{ color: "red" }}>{error}</div>}
+      {error && (
+        <div className="text-sm rounded-lg px-3 py-2 border text-red-700 bg-red-50 border-red-200">{error}</div>
+      )}
 
-      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 16 }}>
-        <thead>
-          <tr style={{ background: "#f4f4f4", textAlign: "left" }}>
-            <th style={th}>Timestamp</th>
-            <th style={th}>Endpoint</th>
-            <th style={th}>Method</th>
-            <th style={th}>Status</th>
-            <th style={th}>User Email</th>
-            <th style={th}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((l) => (
-            <>
-              <tr key={l.id} style={{ borderBottom: "1px solid #eee" }}>
-                <td style={td}>{new Date(l.createdAt || "").toLocaleString()}</td>
-                <td style={td}>{l.endpoint}</td>
-                <td style={td}>{l.httpMethod}</td>
-                <td style={td}>{l.statusCode}</td>
-                <td style={td}>{l.userEmail}</td>
-                <td style={td}>
-                  <button onClick={() => toggle(l.id)} style={expandBtn}>
-                    {expanded[l.id] ? "Hide" : "View"}
-                  </button>
-                </td>
-              </tr>
+      {/* DataTable */}
+      <DataTable<AuditLog>
+        storageKey="audit-logs"
+        columns={AUDIT_COLUMNS}
+        defaultVisibleColumns={["createdAt", "endpoint", "httpMethod", "statusCode", "userEmail"]}
+        data={visibleLogs}
+        getRowId={(l) => String(l.id)}
+        loading={loading}
+        actions={actions}
+        searchPlaceholder="Search by endpoint, user email, request/response body..."
+        emptyMessage="No audit logs found. Select a date range and click Fetch."
+      />
 
-              {expanded[l.id] && (
-                <tr>
-                  <td colSpan={6} style={{ background: "#fafafa", padding: 12 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <div>
-                        <strong>Request Body</strong>
-                        <pre style={preStyle}>{pretty(l.requestBody)}</pre>
-                      </div>
-                      <div>
-                        <strong>Response Body</strong>
-                        <pre style={preStyle}>{pretty(l.responseBody)}</pre>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </>
-          ))}
-        </tbody>
-      </table>
+      {/* Expanded detail panels */}
+      {Object.entries(expanded).filter(([, v]) => v).map(([id]) => {
+        const log = visibleLogs.find((l) => l.id === Number(id));
+        if (!log) return null;
+        return (
+          <div key={id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-gray-900">
+                Log #{log.id} — {log.endpoint} [{log.httpMethod}]
+              </h4>
+              <button onClick={() => toggle(log.id)} className="text-xs text-gray-500 hover:text-gray-700 underline">Close</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-1">Request Body</p>
+                <pre className="bg-gray-50 p-3 rounded-lg text-xs overflow-auto max-h-64 whitespace-pre-wrap break-words border border-gray-100">{pretty(log.requestBody)}</pre>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-1">Response Body</p>
+                <pre className="bg-gray-50 p-3 rounded-lg text-xs overflow-auto max-h-64 whitespace-pre-wrap break-words border border-gray-100">{pretty(log.responseBody)}</pre>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
-
-// Simple Styles
-const th: React.CSSProperties = { padding: 10, fontWeight: 600, fontSize: 13, borderBottom: "2px solid #ddd" };
-const td: React.CSSProperties = { padding: 10, fontSize: 13, verticalAlign: "top" };
-const expandBtn: React.CSSProperties = { padding: "6px 10px", borderRadius: 6, border: "1px solid #ccc", background: "#fff" };
-const preStyle: React.CSSProperties = {
-  background: "#fff",
-  padding: 10,
-  borderRadius: 6,
-  maxHeight: 300,
-  overflow: "auto",
-  fontSize: 12,
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
-};
