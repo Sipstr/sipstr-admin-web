@@ -13,18 +13,25 @@ const EXCLUDED_ENDPOINTS = [
 ];
 
 export function AuditLogsModule() {
-  const [fromDate, setFromDate] = useState(() => formatISO(startOfDay(new Date())).slice(0, 19));
-  const [toDate, setToDate] = useState(() => formatISO(endOfDay(new Date())).slice(0, 19));
+  const [fromDate, setFromDate] = useState(() => formatISO(startOfDay(new Date())).slice(0, 16));
+  const [toDate, setToDate] = useState(() => formatISO(endOfDay(new Date())).slice(0, 16));
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
+  const toInstant = (localDatetime: string): string => {
+    // datetime-local gives "YYYY-MM-DDTHH:MM" or "YYYY-MM-DDTHH:MM:SS" with no timezone.
+    // new Date() parses it as local time; .toISOString() emits the required UTC ISO-8601 with Z.
+    const padded = localDatetime.length === 16 ? `${localDatetime}:00` : localDatetime;
+    return new Date(padded).toISOString();
+  };
+
   const fetchRange = async () => {
     setError(null);
     setLoading(true);
     try {
-      const res = await apiService.getAuditLogsByDateRange(fromDate, toDate);
+      const res = await apiService.getAuditLogsByDateRange(toInstant(fromDate), toInstant(toDate));
       setLogs(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err?.message ?? "Failed to fetch audit logs");
@@ -94,7 +101,7 @@ export function AuditLogsModule() {
             <label className="text-xs font-medium text-gray-600 mb-1">From</label>
             <input
               type="datetime-local"
-              value={fromDate.slice(0, 19)}
+              value={fromDate.slice(0, 16)}
               onChange={(e) => setFromDate(e.target.value)}
               className="filter-input"
             />
@@ -103,7 +110,7 @@ export function AuditLogsModule() {
             <label className="text-xs font-medium text-gray-600 mb-1">To</label>
             <input
               type="datetime-local"
-              value={toDate.slice(0, 19)}
+              value={toDate.slice(0, 16)}
               onChange={(e) => setToDate(e.target.value)}
               className="filter-input"
             />
