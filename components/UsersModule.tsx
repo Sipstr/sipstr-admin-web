@@ -3,8 +3,10 @@
 
 import { useState, useEffect } from "react";
 import { apiService } from "@/services/apiService";
-import { CrudTable } from "./CrudTable";
+import { DataTable, ColumnDef, DataTableAction } from "./DataTable";
 import { User } from "@/services/types";
+import { PaginationControls } from "./PaginationControls";
+import { RolesModule } from "./RolesModule";
 
 type AppUser = Partial<User & { role?: any }>;
 
@@ -105,6 +107,7 @@ const AlertDialog: React.FC<{ alert: CustomAlert; onClose: () => void }> = ({ al
 /* ---------------------------------------------------------- */
 
 export function UsersModule() {
+  const [activeTab, setActiveTab] = useState<"users" | "roles">("users");
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -131,7 +134,7 @@ export function UsersModule() {
   // search + pagination simple
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [size] = useState(10);
+  const [size, setSize] = useState(10);
 
   // pagination meta from backend
   const [totalElements, setTotalElements] = useState(0);
@@ -165,7 +168,7 @@ export function UsersModule() {
   useEffect(() => {
     loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page, size]);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -368,14 +371,35 @@ export function UsersModule() {
 
   // Render
   return (
-    <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-        <input
-          placeholder="Search name, email, mobile..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: 8, borderRadius: 6, border: "1px solid #ccc", flex: 1 }}
-        />
+    <div className="page-container-sidebar page-content">
+      <div className="page-header">
+        <h2 className="page-title">User Management</h2>
+        <p className="page-subtitle">Manage platform users, roles, and profile details.</p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm mb-4">
+        <div className="flex flex-wrap gap-2">
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${activeTab === "users" ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+            onClick={() => setActiveTab("users")}
+          >
+            Users
+          </button>
+          <button
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${activeTab === "roles" ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+            onClick={() => setActiveTab("roles")}
+          >
+            Roles
+          </button>
+        </div>
+      </div>
+
+      {activeTab === "roles" ? (
+        <RolesModule />
+      ) : (
+      <div className="page-section">
+        <div className="page-section-content">
+        <div className="flex gap-2 mb-3 items-center justify-end">
         <button
           onClick={() => {
             setShowAddForm((s) => !s);
@@ -383,11 +407,11 @@ export function UsersModule() {
               setCreateForm({ fullName: "", email: "", mobileNumber: "", password: "", dob: "", roleName: "CUSTOMER" });
             }
           }}
-          style={{ padding: "8px 12px", background: "#FF6600", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer"}}
+          className="primary-btn"
         >
           {showAddForm ? "Cancel" : "+ Add User"}
         </button>
-        <button onClick={() => loadUsers()} disabled={loading} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", cursor: loading ? "not-allowed" : "pointer" }}>
+        <button onClick={() => loadUsers()} disabled={loading} className="secondary-btn" style={{ cursor: loading ? "not-allowed" : "pointer" }}>
           Refresh
         </button>
       </div>
@@ -443,79 +467,53 @@ export function UsersModule() {
         </div>
       )}
 
-      <CrudTable
-        columns={["ID", "Name", "Email / Mobile", "Role", "Actions"]}
-        data={paginated.map((u) => {
-          const idVal = u.uuid || String(u.id || "");
-          const displayId = idVal ? idVal.slice(0, 8) : "-";
-          const displayName = u.fullName ?? "-";
-          const displayContact = u.email ? String(u.email) : u.mobileNumber ? String(u.mobileNumber) : "-";
-          const displayRole = u.roleName ?? (typeof u.role === "string" ? u.role : u.role?.name ?? u.role?.roleName ?? "-");
-
-          return {
-            id: idVal || displayId,
-            cells: [displayId, displayName, displayContact, displayRole],
-            actions: [
-              { label: "View", onClick: () => openViewUser(u.uuid || u.id) },
-              { label: "Edit", onClick: () => openEditUser(u) },
-              { label: "Delete", onClick: () => handleDeleteUser(u.uuid || u.id) },
-            ],
-          };
-        })}
+      <DataTable<AppUser>
+        storageKey="users-list"
+        columns={[
+          { key: "id", label: "ID", getValue: (u) => (u.uuid || String(u.id || "")).slice(0, 8) || "-" },
+          { key: "fullName", label: "Name", getValue: (u) => u.fullName ?? "-" },
+          { key: "email", label: "Email", getValue: (u) => u.email ?? "-" },
+          { key: "mobileNumber", label: "Mobile", getValue: (u) => u.mobileNumber ?? "-" },
+          { key: "roleName", label: "Role", getValue: (u) => u.roleName ?? (typeof u.role === "string" ? u.role : u.role?.name ?? u.role?.roleName ?? "-"), render: (val) => <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{val}</span> },
+          { key: "dob", label: "DOB", getValue: (u) => u.dob ?? "-", hidden: true },
+        ]}
+        defaultVisibleColumns={["id", "fullName", "email", "mobileNumber", "roleName"]}
+        data={paginated}
+        getRowId={(u) => u.uuid || String(u.id || Math.random())}
         loading={loading}
+        actions={[
+          { label: "View", onClick: (u) => openViewUser(u.uuid || u.id) },
+          { icon: "edit", label: "Edit", onClick: (u) => openEditUser(u) },
+          { icon: "delete", label: "Delete", onClick: (u) => handleDeleteUser(u.uuid || u.id) },
+        ]}
+        searchPlaceholder="Search name, email, mobile..."
+        searchTerm={search}
+        onSearchChange={setSearch}
+        emptyMessage="No users found."
+        serverPagination={{
+          page: page + 1,
+          totalPages: Math.max(totalPages, 1),
+          totalItems: totalElements,
+          pageSize: size,
+          onPageChange: (nextPage) => setPage(nextPage - 1),
+          onPageSizeChange: (nextSize) => { setSize(nextSize); setPage(0); },
+        }}
       />
-
-      {/* Pagination controls */}
-      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
-        <div>
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={loading || page === 0}
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #ddd",
-              background: "#fff",
-              cursor: loading || page === 0 ? "not-allowed" : "pointer",
-            }}
-          >
-            Prev
-          </button>
-
-          <button
-            onClick={() => {
-              if (page + 1 < totalPages) setPage((p) => p + 1);
-            }}
-            disabled={loading || page + 1 >= totalPages}
-            style={{
-              marginLeft: 8,
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #ddd",
-              background: "#fff",
-              cursor: loading || page + 1 >= totalPages ? "not-allowed" : "pointer",
-            }}
-          >
-            Next
-          </button>
-        </div>
-
-        <div style={{ color: "#666" }}>
-          Showing {paginated.length} of {totalElements} — page {page + 1} of {totalPages}
-        </div>
       </div>
+      </div>
+      )}
 
       {/* View modal */}
       {viewUser && (
-        <div style={{ position: "fixed", inset: 0, display: "flex", justifyContent: "center", alignItems: "center", background: "rgba(0,0,0,0.28)", zIndex: 200 }}>
-          <div style={{ width: 520, background: "#fff", borderRadius: 8, padding: 18 }}>
-            <h3 style={{ marginBottom: 8 }}>User details</h3>
+        <div className="modal-overlay" style={{ zIndex: 200 }}>
+          <div className="modal-panel p-5" style={{ width: 520 }}>
+            <h3 className="modal-title mb-3">User details</h3>
             <div style={{ marginBottom: 8 }}><strong>Name:</strong> {viewUser.fullName}</div>
             <div style={{ marginBottom: 8 }}><strong>Email:</strong> {viewUser.email || "-"}</div>
             <div style={{ marginBottom: 8 }}><strong>Mobile:</strong> {viewUser.mobileNumber || "-"}</div>
             <div style={{ marginBottom: 8 }}><strong>Role:</strong> {viewUser.roleName || viewUser.role?.name || "-"}</div>
-            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={() => setViewUser(null)} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", background: "#fff" }}>Close</button>
+            <div className="modal-footer">
+              <button onClick={() => setViewUser(null)} className="modal-btn-secondary">Close</button>
             </div>
           </div>
         </div>
@@ -523,21 +521,21 @@ export function UsersModule() {
 
       {/* Edit modal */}
       {editUser && (
-        <div style={{ position: "fixed", inset: 0, display: "flex", justifyContent: "center", alignItems: "center", background: "rgba(0,0,0,0.28)", zIndex: 200 }}>
-          <div style={{ width: 520, background: "#fff", borderRadius: 8, padding: 18 }}>
-            <h3 style={{ marginBottom: 8 }}>Edit user profile</h3>
+        <div className="modal-overlay" style={{ zIndex: 200 }}>
+          <div className="modal-panel p-5" style={{ width: 520 }}>
+            <h3 className="modal-title mb-3">Edit user profile</h3>
             <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", marginBottom: 6 }}>Full name</label>
-              <input value={updateForm.fullName} onChange={(e) => setUpdateForm((s) => ({ ...s, fullName: e.target.value }))} style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #ddd" }} />
+              <label className="modal-label">Full name</label>
+              <input value={updateForm.fullName} onChange={(e) => setUpdateForm((s) => ({ ...s, fullName: e.target.value }))} className="modal-input" />
             </div>
             <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", marginBottom: 6 }}>DOB</label>
-              <input type="date" value={updateForm.dob} onChange={(e) => setUpdateForm((s) => ({ ...s, dob: e.target.value }))} style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #ddd" }} />
+              <label className="modal-label">DOB</label>
+              <input type="date" value={updateForm.dob} onChange={(e) => setUpdateForm((s) => ({ ...s, dob: e.target.value }))} className="modal-input" />
             </div>
 
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => { setEditUser(null); setUpdateForm({ fullName: "", dob: "" }); }} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", background: "#fff" }}>Cancel</button>
-              <button onClick={handleUpdateUser} style={{ padding: "8px 12px", borderRadius: 6, border: "none", background: "#FF6600", color: "#fff" }}>Save</button>
+            <div className="modal-footer">
+              <button onClick={() => { setEditUser(null); setUpdateForm({ fullName: "", dob: "" }); }} className="modal-btn-secondary">Cancel</button>
+              <button onClick={handleUpdateUser} className="modal-btn-primary">Save</button>
             </div>
           </div>
         </div>

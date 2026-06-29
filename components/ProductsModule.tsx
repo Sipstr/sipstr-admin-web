@@ -6,6 +6,7 @@ import { apiService } from "@/services/apiService";
 import { Product } from "@/services/types";
 import ProductModal from "@/components/ProductModal";
 import VariantModal from "@/components/VariantModal";
+import { PaginationControls } from "./PaginationControls";
 
 /* ---------------- BCP-style AlertDialog (used by ProductModules) ---------------- */
 type CustomAlert = {
@@ -115,6 +116,8 @@ const ProductModules: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState<FilterOption>("ALL");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Custom alert state (BCP-style)
   const [customAlert, setCustomAlert] = useState<CustomAlert>({
@@ -142,6 +145,7 @@ const ProductModules: React.FC = () => {
 
   useEffect(() => {
     fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Filtering logic
@@ -166,6 +170,17 @@ const ProductModules: React.FC = () => {
 
     setFilteredProducts(products.filter((p) => matchesSearch(p) && matchesFilter(p)));
   }, [searchTerm, filter, products]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filter, products.length, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const pagedProducts = filteredProducts.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => {
+    setPage((p) => Math.min(Math.max(1, p), totalPages));
+  }, [totalPages]);
 
   // Product create/update handler (shows success)
   const handleProductSaved = (savedProduct: Product) => {
@@ -271,13 +286,18 @@ const ProductModules: React.FC = () => {
   };
 
   return (
-    <div className="p-6 bg-white min-h-screen">
+    <div className="page-container-sidebar page-content">
+      <div className="page-header">
+        <h2 className="page-title">Product Catalog</h2>
+        <p className="page-subtitle">Manage products, variants, and live status in the master catalog.</p>
+      </div>
+
+      <div className="page-section">
+        <div className="page-section-content">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold" style={{ color: "#FF6600" }}>
-          Products
-        </h1>
+        <h1 className="text-xl font-semibold text-gray-900">Products</h1>
         <button
-          className="px-4 py-2 bg-[#FF6600] text-white rounded hover:bg-[#e65c00]"
+          className="primary-btn"
           onClick={() => {
             setEditingProduct(null);
             setIsProductModalOpen(true);
@@ -294,7 +314,7 @@ const ProductModules: React.FC = () => {
           placeholder="Search by Name, Brand, Category..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="border border-gray-300 rounded px-3 py-2 w-full text-black"
+          className="filter-input w-full"
         />
 
         <div>
@@ -305,7 +325,7 @@ const ProductModules: React.FC = () => {
             id="activeFilter"
             value={filter}
             onChange={(e) => setFilter(e.target.value as FilterOption)}
-            className="border border-gray-300 rounded px-3 py-2 bg-white text-black"
+            className="filter-select"
             title="Filter by active/inactive"
           >
             <option value="ALL">All</option>
@@ -316,47 +336,49 @@ const ProductModules: React.FC = () => {
       </div>
 
       {/* Product Table */}
-      <table className="w-full border-collapse shadow-lg">
+      <div className="table-shell">
+      <table className="table-base">
         <thead>
-          <tr className="bg-[#FF6600] text-white">
-            <th className="border p-3 text-left">Product ID</th>
-            <th className="border p-3 text-left">Name</th>
-            <th className="border p-3 text-left">Category</th>
-            <th className="border p-3 text-left">Brand</th>
-            <th className="border p-3 text-center">Active</th>
-            <th className="border p-3 text-center">Actions</th>
+          <tr className="table-head-row">
+            <th className="table-head-cell">Product ID</th>
+            <th className="table-head-cell">Name</th>
+            <th className="table-head-cell">Category</th>
+            <th className="table-head-cell">Brand</th>
+            <th className="table-head-cell text-center">Active</th>
+            <th className="table-head-cell text-center">Actions</th>
           </tr>
         </thead>
         <tbody>
           {filteredProducts.length === 0 && (
             <tr>
-              <td colSpan={6} className="p-6 text-center text-gray-600">
+              <td colSpan={6} className="table-cell text-center text-gray-500 py-6">
                 No products found.
               </td>
             </tr>
           )}
 
-          {filteredProducts.map((product) => {
+          {pagedProducts.map((product) => {
             const isActive = (product as any).isActive ?? (product as any).active ?? false;
             return (
-              <tr key={product.uuid} className="hover:bg-gray-100 text-black">
-                <td className="border p-2">{product.uuid}</td>
-                <td className="border p-2">{product.productName}</td>
-                <td className="border p-2">{product.categoryName || "-"}</td>
-                <td className="border p-2">{product.brand || "-"}</td>
+              <tr key={product.uuid} className="table-row table-row-hover">
+                <td className="table-cell">{product.uuid}</td>
+                <td className="table-cell">{product.productName}</td>
+                <td className="table-cell">{product.categoryName || "-"}</td>
+                <td className="table-cell">{product.brand || "-"}</td>
 
-                <td className="border p-2 text-center">
+                <td className="table-cell text-center">
                   <button
-                    className={`px-3 py-1 rounded ${isActive ? "bg-green-500 text-white" : "bg-gray-300 text-black"}`}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold ${isActive ? "bg-emerald-500 text-white" : "bg-gray-200 text-gray-700"}`}
                     onClick={() => toggleActive(product)}
                   >
                     {isActive ? "Active" : "Inactive"}
                   </button>
                 </td>
 
-                <td className="border p-2 text-center flex justify-center gap-2">
+                <td className="table-action-cell">
+                  <div className="table-actions">
                   <button
-                    className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+                    className="table-action-btn-success"
                     onClick={() => {
                       setSelectedProductUuid(product.uuid || null);
                       setSelectedProductNumericId(product.productId ?? null);
@@ -367,7 +389,7 @@ const ProductModules: React.FC = () => {
                   </button>
 
                   <button
-                    className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    className="table-action-btn-info"
                     onClick={() => {
                       setEditingProduct(product);
                       setIsProductModalOpen(true);
@@ -377,17 +399,30 @@ const ProductModules: React.FC = () => {
                   </button>
 
                   <button
-                    className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                    className="table-action-btn-danger"
                     onClick={() => handleDeleteProduct(product)}
                   >
                     Delete
                   </button>
+                  </div>
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 mt-3">
+        <PaginationControls
+          page={page}
+          totalPages={totalPages}
+          totalItems={filteredProducts.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      </div>
 
       {/* Modals */}
       <ProductModal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} product={editingProduct} onProductSaved={handleProductSaved} />
@@ -402,6 +437,8 @@ const ProductModules: React.FC = () => {
 
       {/* AlertDialog */}
       <AlertDialog alert={customAlert} onClose={closeAlert} />
+      </div>
+      </div>
     </div>
   );
 };

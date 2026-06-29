@@ -131,6 +131,7 @@ export function ReasonsModule() {
 
   useEffect(() => {
     loadReasons();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadReasons = async () => {

@@ -79,31 +79,31 @@ const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, o
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-lg shadow-lg relative">
-        <h2 className="text-xl font-bold mb-4">{product ? "Update Product" : "Add Product"}</h2>
+    <div className="modal-overlay">
+      <div className="modal-panel p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <h2 className="modal-title mb-4">{product ? "Update Product" : "Add Product"}</h2>
 
-        <div className="flex flex-col gap-3 max-h-[80vh] overflow-y-auto">
+        <div className="modal-section">
           <input
             type="text"
             name="productName"
             placeholder="Product Name"
             value={formData.productName || ""}
             onChange={handleChange}
-            className="border p-2 rounded w-full"
+            className="modal-input"
           />
           <textarea
             name="description"
             placeholder="Description"
             value={formData.description || ""}
             onChange={handleChange}
-            className="border p-2 rounded w-full"
+            className="w-full min-h-24 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900"
           />
           <select
             name="brand"
             value={formData.brand || ""}
             onChange={(e) => setFormData((prev) => ({ ...prev, brand: e.target.value }))}
-            className="border p-2 rounded w-full bg-white"
+            className="modal-input bg-white"
           >
             <option value="">-- Select Brand --</option>
             {brands.map((b) => (
@@ -114,7 +114,7 @@ const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, o
             name="categoryName"
             value={formData.categoryName || ""}
             onChange={(e) => setFormData((prev) => ({ ...prev, categoryName: e.target.value }))}
-            className="border p-2 rounded w-full bg-white"
+            className="modal-input bg-white"
           >
             <option value="">-- Select Category --</option>
             {categories.map((c) => (
@@ -127,11 +127,11 @@ const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, o
             placeholder="Tax Category"
             value={formData.taxCategory || ""}
             onChange={handleChange}
-            className="border p-2 rounded w-full"
+            className="modal-input"
           />
 
           {/* Optional booleans */}
-          <div className="flex flex-wrap gap-4 items-center">
+          <div className="modal-divider pt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -190,11 +190,11 @@ const ProductModal: React.FC<ProductModalProps> = ({ isOpen, onClose, product, o
           </div>
         </div>
 
-        <div className="mt-4 flex justify-end gap-2">
-          <button className="px-4 py-2 bg-gray-300 rounded" onClick={onClose}>
+        <div className="modal-footer">
+          <button className="modal-btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button className="px-4 py-2 bg-[#FF6600] text-white rounded hover:bg-[#e65c00]" onClick={handleSave}>
+          <button className="modal-btn-primary" onClick={handleSave}>
             {product ? "Update" : "Add"}
           </button>
         </div>

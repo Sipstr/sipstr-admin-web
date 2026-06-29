@@ -207,7 +207,8 @@ export function BCPModule() {
       if (module === "brands") res = await apiService.getBrands()
       else if (module === "categories") res = await apiService.getCategories()
       else if (module === "packages") res = await apiService.getPackageUnits() // Add this API in apiService
-      setData(res)
+      const normalized = Array.isArray(res) ? res : ((res as any)?.content ?? [])
+      setData(Array.isArray(normalized) ? normalized : [])
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load data"
       setError(msg)
@@ -319,9 +320,10 @@ export function BCPModule() {
   }
 
   const filteredData = useMemo(() => {
-    if (!debouncedQuery) return data
+    const safeData = Array.isArray(data) ? data : []
+    if (!debouncedQuery) return safeData
     const q = debouncedQuery.toLowerCase()
-    return data.filter((item) => {
+    return safeData.filter((item) => {
       const name =
         item.name ??
         item.categoryName ??
@@ -340,7 +342,7 @@ export function BCPModule() {
       : ["ID", "Package Name", "Type", "Description", "Actions"]
 
   const tableData = filteredData.map((item) => {
-    const id = item.id ?? item.categoryId ?? item.package_id
+    const id = item.id ?? item.categoryId ?? item.packageId ?? item.package_id
     let cells: any[] = []
 
     if (selectedModule === "brands") cells = [item.id, item.name]

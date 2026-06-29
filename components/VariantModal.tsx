@@ -111,6 +111,7 @@ const AlertDialog: React.FC<{ alert: CustomAlert; onClose: () => void }> = ({ al
 
 const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUuid, productId, onVariantAdded }) => {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [productActive, setProductActive] = useState(false);
   const [currentVariant, setCurrentVariant] = useState<ProductVariant>({ unitPrice: 0, variantId: 0 } as ProductVariant);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -128,6 +129,7 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
       const fetchVariants = async () => {
         try {
           const product = await apiService.getProductById(productUuid);
+          setProductActive(Boolean((product as any).isActive ?? (product as any).active ?? false));
           setVariants(product.variantsDTO || []);
         } catch (err) {
           console.error("Failed to fetch variants:", err);
@@ -137,6 +139,7 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
       fetchVariants();
     } else {
       setVariants([]);
+      setProductActive(false);
     }
   }, [productUuid]);
 
@@ -211,6 +214,26 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
     setShowAdvanced(true);
   };
 
+  const renderStatus = (variant: ProductVariant) => {
+    const approval = (variant.approvalStatus ?? "PENDING_APPROVAL").toUpperCase();
+    const isLive = approval === "APPROVED" && productActive;
+    const approvalStyle =
+      approval === "APPROVED"
+        ? "bg-emerald-100 text-emerald-700"
+        : approval === "REJECTED"
+          ? "bg-rose-100 text-rose-700"
+          : "bg-amber-100 text-amber-700";
+
+    return (
+      <div className="flex flex-wrap gap-2">
+        <span className={`px-2 py-1 rounded-full text-xs font-bold ${approvalStyle}`}>{approval}</span>
+        <span className={`px-2 py-1 rounded-full text-xs font-bold ${isLive ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
+          {isLive ? "LIVE" : "PENDING"}
+        </span>
+      </div>
+    );
+  };
+
   const handleDelete = async (index: number) => {
     const variantToDelete = variants[index];
     if (!variantToDelete) return;
@@ -236,19 +259,20 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
 
   return (
     <>
-      <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-        <div className="bg-white p-6 rounded-lg max-h-[90vh] overflow-y-auto w-[700px]">
-          <h2 className="text-xl font-semibold mb-4">Manage Product Variants</h2>
+      <div className="modal-overlay">
+        <div className="modal-panel p-6 max-h-[90vh] overflow-y-auto w-[700px]">
+          <h2 className="modal-title mb-4">Manage Product Variants</h2>
 
           {variants.length > 0 && (
             <div className="mb-4">
-              <h3 className="font-semibold mb-2">Existing Variants</h3>
+              <h3 className="text-base font-semibold text-gray-800 mb-2">Existing Variants</h3>
               <table className="w-full border-collapse text-black">
                 <thead>
                   <tr className="bg-gray-200">
                     <th className="border p-2">Package Name</th>
                     <th className="border p-2">UPC</th>
                     <th className="border p-2">Unit Price</th>
+                    <th className="border p-2">Approval</th>
                     <th className="border p-2">Actions</th>
                   </tr>
                 </thead>
@@ -258,6 +282,7 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
                       <td className="border p-2">{v.packageName}</td>
                       <td className="border p-2">{v.upc}</td>
                       <td className="border p-2">{v.unitPrice}</td>
+                      <td className="border p-2">{renderStatus(v)}</td>
                       <td className="border p-2 flex gap-2">
                         <button className="px-2 py-1 bg-orange-500 text-white rounded hover:bg-orange-600" onClick={() => handleEdit(i)}>
                           Update
@@ -275,32 +300,62 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
 
           {/* Variant form */}
           <div className="space-y-3">
-            <h3 className="font-semibold">{editingIndex !== null ? "Edit Variant" : "Add New Variant"}</h3>
+            <h3 className="text-base font-semibold text-gray-800">{editingIndex !== null ? "Edit Variant" : "Add New Variant"}</h3>
 
             <div>
-              <label className="block font-medium">Package Name</label>
-              <input name="packageName" value={currentVariant.packageName || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+              <label className="modal-label">Package Name</label>
+              <input name="packageName" value={currentVariant.packageName || ""} onChange={handleChange} className="modal-input" />
             </div>
 
             <div>
-              <label className="block font-medium">Unit Price *</label>
-              <input name="unitPrice" type="number" value={currentVariant.unitPrice} onChange={handleChange} className="border w-full p-2 rounded" />
-              {errors.unitPrice && <p className="text-red-500">{errors.unitPrice}</p>}
+              <label className="modal-label">Unit Price *</label>
+              <input name="unitPrice" type="number" value={currentVariant.unitPrice} onChange={handleChange} className="modal-input" />
+              {errors.unitPrice && <p className="text-sm text-red-600 mt-1">{errors.unitPrice}</p>}
             </div>
 
             <div>
-              <label className="block font-medium">UPC</label>
-              <input name="upc" value={currentVariant.upc || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+              <label className="modal-label">UPC</label>
+              <input name="upc" value={currentVariant.upc || ""} onChange={handleChange} className="modal-input" />
             </div>
 
             <div>
-              <label className="block font-medium">Thumbnail Image URL</label>
-              <input name="thumbnailImageUrl" value={currentVariant.thumbnailImageUrl || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+              <label className="modal-label">Thumbnail Image</label>
+              {currentVariant.thumbnailImageUrl && (
+                <img src={currentVariant.thumbnailImageUrl} alt="Thumbnail" className="w-16 h-16 object-cover rounded border border-gray-200 mb-2" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              )}
+              <div className="flex items-center gap-2">
+                <label className="px-3 py-1.5 text-xs rounded border border-gray-300 hover:bg-gray-50 cursor-pointer inline-flex items-center gap-1">
+                  Upload
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onloadend = () => setCurrentVariant((prev) => ({ ...prev, thumbnailImageUrl: reader.result as string }));
+                    reader.readAsDataURL(file);
+                  }} />
+                </label>
+                <input name="thumbnailImageUrl" value={currentVariant.thumbnailImageUrl || ""} onChange={handleChange} className="modal-input flex-1" placeholder="Or paste URL" />
+              </div>
             </div>
 
             <div>
-              <label className="block font-medium">Full Size Image URL</label>
-              <input name="fullSizeImageUrl" value={currentVariant.fullSizeImageUrl || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+              <label className="modal-label">Full Size Image</label>
+              {currentVariant.fullSizeImageUrl && (
+                <img src={currentVariant.fullSizeImageUrl} alt="Full size" className="w-16 h-16 object-cover rounded border border-gray-200 mb-2" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              )}
+              <div className="flex items-center gap-2">
+                <label className="px-3 py-1.5 text-xs rounded border border-gray-300 hover:bg-gray-50 cursor-pointer inline-flex items-center gap-1">
+                  Upload
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onloadend = () => setCurrentVariant((prev) => ({ ...prev, fullSizeImageUrl: reader.result as string }));
+                    reader.readAsDataURL(file);
+                  }} />
+                </label>
+                <input name="fullSizeImageUrl" value={currentVariant.fullSizeImageUrl || ""} onChange={handleChange} className="modal-input flex-1" placeholder="Or paste URL" />
+              </div>
             </div>
 
             <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="mt-2 text-blue-600 underline">
@@ -308,7 +363,7 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
             </button>
 
             {showAdvanced && (
-              <div className="mt-3 space-y-2 border-t pt-2">
+              <div className="mt-3 space-y-2 modal-divider pt-3">
                 {[
                   { label: "Shelf Life (Days)", name: "shelfLifeDays" },
                   { label: "Alcohol By Volume", name: "alcoholByVolume" },
@@ -320,29 +375,29 @@ const VariantModal: React.FC<VariantModalProps> = ({ isOpen, onClose, productUui
                   { label: "Added Sugars", name: "addedSugars" },
                 ].map((field) => (
                   <div key={field.name}>
-                    <label className="block font-medium">{field.label}</label>
-                    <input name={field.name} type="number" value={(currentVariant as any)[field.name] || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+                    <label className="modal-label">{field.label}</label>
+                    <input name={field.name} type="number" value={(currentVariant as any)[field.name] || ""} onChange={handleChange} className="modal-input" />
                   </div>
                 ))}
 
                 <div>
-                  <label className="block font-medium">Dimensions (cm)</label>
-                  <input name="dimensionsCm" value={currentVariant.dimensionsCm || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+                  <label className="modal-label">Dimensions (cm)</label>
+                  <input name="dimensionsCm" value={currentVariant.dimensionsCm || ""} onChange={handleChange} className="modal-input" />
                 </div>
 
                 <div>
-                  <label className="block font-medium">Storage Instructions</label>
-                  <input name="storageInstructions" value={currentVariant.storageInstructions || ""} onChange={handleChange} className="border w-full p-2 rounded" />
+                  <label className="modal-label">Storage Instructions</label>
+                  <input name="storageInstructions" value={currentVariant.storageInstructions || ""} onChange={handleChange} className="modal-input" />
                 </div>
               </div>
             )}
           </div>
 
-          <div className="mt-4 flex justify-end gap-2">
-            <button onClick={onClose} className="px-4 py-2 rounded bg-gray-300 hover:bg-gray-400">
+          <div className="modal-footer">
+            <button onClick={onClose} className="modal-btn-secondary">
               Cancel
             </button>
-            <button onClick={handleSubmit} className="px-4 py-2 rounded bg-orange-600 text-white hover:bg-orange-700">
+            <button onClick={handleSubmit} className="modal-btn-primary">
               {editingIndex !== null ? "Update Variant" : "Add Variant"}
             </button>
           </div>

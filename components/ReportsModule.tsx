@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiService } from "@/services/apiService";
 import { StoreReportItemDTO, PageResponse } from "@/services/types";
+import { PaginationControls } from "./PaginationControls";
 
 /* ------------------ Helpers ------------------ */
 function formatDateToDDMMYYYY(isoDate: string) {
@@ -247,22 +248,21 @@ function safeStringify(value: any) {
     }
   };
 
-  const onPrev = () => {
-    if (page > 0) loadPage(page - 1);
-  };
-  const onNext = () => {
-    if (page < totalPages - 1) loadPage(page + 1);
-  };
-
   // whether generate button should be enabled
   const isFormValid = Boolean(selectedStoreUuid && dateRange.start && dateRange.end && dateRange.start <= dateRange.end);
 
   return (
-    <div>
-      <div style={{ backgroundColor: "#fff", padding: 20, borderRadius: 8, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-        <h3 style={{ margin: "0 0 15px 0", color: "#333" }}>Generate Store Report</h3>
+    <div className="page-container-sidebar page-content">
+      <div className="page-header">
+        <h2 className="page-title">Reports</h2>
+        <p className="page-subtitle">Generate store-level financial and order status reports.</p>
+      </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 15 }}>
+      <div className="page-section">
+        <div className="page-section-content">
+        <h3 className="text-base font-semibold text-gray-800 mb-4">Generate Store Report</h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div style={{ position: "relative" }}>
             <label style={{ display: "block", marginBottom: 5, fontSize: 14, fontWeight: 500 }}>Store Name</label>
             <input
@@ -296,7 +296,7 @@ function safeStringify(value: any) {
                   setShowSuggestions(false);
                 }
               }}
-              style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14 }}
+              className="filter-input w-full"
             />
 
             {/* Suggestion dropdown now positioned with calc(100% + small gap) so it won't overlay input */}
@@ -343,7 +343,7 @@ function safeStringify(value: any) {
               type="date"
               value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-              style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14 }}
+              className="filter-input w-full"
             />
           </div>
 
@@ -353,7 +353,7 @@ function safeStringify(value: any) {
               type="date"
               value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-              style={{ width: "100%", padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14 }}
+              className="filter-input w-full"
             />
           </div>
         </div>
@@ -362,17 +362,12 @@ function safeStringify(value: any) {
           <button
             onClick={generateReport}
             disabled={loading || !isFormValid}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#FF6600",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: loading || !isFormValid ? "not-allowed" : "pointer",
-            }}
+            className="primary-btn"
+            style={{ cursor: loading || !isFormValid ? "not-allowed" : "pointer", opacity: loading || !isFormValid ? 0.6 : 1 }}
           >
             {loading ? "Generating..." : "Generate Report"}
           </button>
+        </div>
         </div>
       </div>
 
@@ -380,40 +375,40 @@ function safeStringify(value: any) {
         <div style={{ backgroundColor: "#fee", color: "#c33", padding: 12, borderRadius: 4, marginBottom: 20 }}>{error}</div>
       )}
 
-      <div style={{ backgroundColor: "#fff", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.1)", overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className="table-shell">
+        <table className="table-base">
           <thead>
-            <tr style={{ backgroundColor: "#f5f5f5", borderBottom: "1px solid #e0e0e0" }}>
-              <th style={{ padding: 12, textAlign: "left", fontSize: 14, fontWeight: 600 }}>Store</th>
-              <th style={{ padding: 12, textAlign: "left", fontSize: 14, fontWeight: 600 }}>Order</th>
-              <th style={{ padding: 12, textAlign: "left", fontSize: 14, fontWeight: 600 }}>Subtotal</th>
-              <th style={{ padding: 12, textAlign: "left", fontSize: 14, fontWeight: 600 }}>Store Total</th>
-              <th style={{ padding: 12, textAlign: "left", fontSize: 14, fontWeight: 600 }}>Net Total</th>
-              <th style={{ padding: 12, textAlign: "left", fontSize: 14, fontWeight: 600 }}>Status</th>
+            <tr className="table-head-row">
+              <th className="table-head-cell">Store</th>
+              <th className="table-head-cell">Order</th>
+              <th className="table-head-cell">Subtotal</th>
+              <th className="table-head-cell">Store Total</th>
+              <th className="table-head-cell">Net Total</th>
+              <th className="table-head-cell">Status</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#666" }}>
+                <td colSpan={6} className="table-cell text-center text-gray-500 py-6">
                   Loading...
                 </td>
               </tr>
             ) : reports.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#666" }}>
+                <td colSpan={6} className="table-cell text-center text-gray-500 py-6">
                   No reports available
                 </td>
               </tr>
             ) : (
               reports.map((r, idx) => (
-                <tr key={`${r.orderUuid ?? idx}`} style={{ borderBottom: "1px solid #e0e0e0" }}>
-                  <td style={{ padding: 12, fontSize: 14 }}>{r.storeName}</td>
-                  <td style={{ padding: 12, fontSize: 14 }}>{r.orderUuid}</td>
-                  <td style={{ padding: 12, fontSize: 14 }}>{formatMoney(r.subtotal)}</td>
-                  <td style={{ padding: 12, fontSize: 14 }}>{formatMoney(r.storeTotal)}</td>
-                  <td style={{ padding: 12, fontSize: 14 }}>{formatMoney(r.netTotal)}</td>
-                  <td style={{ padding: 12, fontSize: 14 }}>{r.storeStatus}</td>
+                <tr key={`${r.orderUuid ?? idx}`} className="table-row table-row-hover">
+                  <td className="table-cell">{r.storeName}</td>
+                  <td className="table-cell">{r.orderUuid}</td>
+                  <td className="table-cell">{formatMoney(r.subtotal)}</td>
+                  <td className="table-cell">{formatMoney(r.storeTotal)}</td>
+                  <td className="table-cell">{formatMoney(r.netTotal)}</td>
+                  <td className="table-cell">{r.storeStatus}</td>
                 </tr>
               ))
             )}
@@ -421,35 +416,16 @@ function safeStringify(value: any) {
         </table>
       </div>
 
-      {/* Pagination */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
-        <div style={{ color: "#666" }}>{totalElements > 0 ? `Showing page ${page + 1} of ${totalPages} — ${totalElements} items` : ""}</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={onPrev}
-            disabled={page === 0 || loading}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 4,
-              border: "1px solid #ddd",
-              backgroundColor: page === 0 ? "#f7f7f7" : "white",
-            }}
-          >
-            Prev
-          </button>
-          <button
-            onClick={onNext}
-            disabled={page >= totalPages - 1 || loading}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 4,
-              border: "1px solid #ddd",
-              backgroundColor: page >= totalPages - 1 ? "#f7f7f7" : "white",
-            }}
-          >
-            Next
-          </button>
-        </div>
+      <div style={{ marginTop: 12 }}>
+        <PaginationControls
+          page={page + 1}
+          totalPages={Math.max(totalPages, 1)}
+          totalItems={totalElements}
+          pageSize={size}
+          onPageChange={(nextPage) => loadPage(nextPage - 1)}
+          showPageSize={false}
+          disabled={loading}
+        />
       </div>
 
       <Toast open={toastOpen} message={toastMsg} type={toastType} onClose={() => setToastOpen(false)} />

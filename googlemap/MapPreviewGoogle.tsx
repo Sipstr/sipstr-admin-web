@@ -18,33 +18,24 @@ export default function MapPreviewGoogle({
   height = 520,
 }: MapPreviewGoogleProps) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY;
-  if (!apiKey) {
-    return (
-      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", padding: 12, textAlign: "center" }}>
-        <div>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Google Maps API key missing</div>
-          <div style={{ color: "#555", fontSize: 13 }}>
-            Configuration expected.
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const missingApiKey = !apiKey;
 
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: apiKey,
+    googleMapsApiKey: apiKey ?? "",
     libraries: ["geometry", "places"],
   });
 
   // derive a fallback center from the first zone first coordinate (if available)
-  const fallbackCenter: [number, number] =
-    center ??
-    (zones?.[0]?.coordinates?.[0]?.[0]
-      ? ([
-          (zones[0].coordinates[0] as any)[0] as number,
-          (zones[0].coordinates[0] as any)[1] as number,
-        ] as [number, number])
-      : [0, 0]);
+  const fallbackCenter = useMemo<[number, number]>(() => {
+    if (center) return center;
+    if (zones?.[0]?.coordinates?.[0]?.[0]) {
+      return [
+        (zones[0].coordinates[0] as any)[0] as number,
+        (zones[0].coordinates[0] as any)[1] as number,
+      ];
+    }
+    return [0, 0];
+  }, [center, zones]);
 
   // normalize from [[lat,lng], ...] to { lat, lng } objects for maps API
   const normalizeCoords = (coords: any): any[] => {
@@ -95,6 +86,19 @@ export default function MapPreviewGoogle({
       }
     }
   }, [zones, mapInstance]);
+
+  if (missingApiKey) {
+    return (
+      <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center", padding: 12, textAlign: "center" }}>
+        <div>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Google Maps API key missing</div>
+          <div style={{ color: "#555", fontSize: 13 }}>
+            Configuration expected.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loadError) {
     return <div style={{ height, display: "flex", alignItems: "center", justifyContent: "center" }}>Failed to load Google Maps.</div>;
