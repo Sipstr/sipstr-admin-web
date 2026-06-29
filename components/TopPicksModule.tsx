@@ -186,6 +186,7 @@ export function TopPicksModule() {
   useEffect(() => {
     loadTopPicks()
     loadProductsCache()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadTopPicks = async () => {

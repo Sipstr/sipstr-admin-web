@@ -32,6 +32,8 @@ export interface ProductVariant {
   fullSizeImageUrl?: string;
   upc?: string;
   unitPrice: number;
+  approvalStatus?: string;
+  isLive?: boolean;
   shelfLifeDays?: number;
   alcoholByVolume?: number;
   weightGrams?: number;
@@ -76,7 +78,8 @@ export interface Brand {
 export interface Category { 
   id: string; 
   name: string; 
-  description: string 
+  description: string;
+  imageUrl?: string;
 }
 
 
@@ -391,6 +394,8 @@ export interface StoreInventoryVariantDTO {
   packageName?: string;
   price?: number | string;   // backend BigDecimal often appears as string
   quantity: number;          // available inventory count
+  approvalStatus?: string;
+  isLive?: boolean;
   thumbnailImageUrl?: string;
 }
 
@@ -406,6 +411,27 @@ export interface GroupedStoreInventoryResponseDTO {
   productName: string;
   productId: number;
   variants: StoreInventoryVariantDTO[];
+}
+
+export interface StoreInventoryApprovalQueueDTO {
+  storeInventoryId: number;
+  storeUuid: string;
+  storeName: string;
+  productId: number;
+  productName: string;
+  variantId: number;
+  upc: string;
+  packageName: string;
+  quantity: number;
+  supplierPrice?: number | string;
+  approvalStatus?: string;
+  isLive?: boolean;
+  updatedAt?: string;
+}
+
+export interface StoreInventoryApprovalDecisionDTO {
+  approved: boolean;
+  remarks?: string;
 }
 
 // types.ts (add)
