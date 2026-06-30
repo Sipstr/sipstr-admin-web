@@ -17,11 +17,6 @@ on:
         required: false
         default: false
         type: boolean
-  push:
-    branches:
-      - main
-      - release/integration
-      - develop
 
 permissions:
   id-token: write
@@ -40,11 +35,7 @@ jobs:
       - name: Set environment and subdomain
         id: set-env
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            BRANCH_NAME="${{ github.event.inputs.branch }}"
-          else
-            BRANCH_NAME="${GITHUB_REF_NAME}"
-          fi
+          BRANCH_NAME="${{ github.event.inputs.branch }}"
 
           echo "🔍 BRANCH: ${BRANCH_NAME}"
           echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
